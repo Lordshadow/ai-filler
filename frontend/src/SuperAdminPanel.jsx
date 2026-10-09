@@ -74,7 +74,7 @@ export default function SuperAdminPanel() {
           className={`tab ${activeTab === "forms" ? "active" : ""}`}
           onClick={() => setActiveTab("forms")}
         >
-          📋 Global Form Templates (Google Forms Style)
+          📋 Global Form Templates
         </button>
       </div>
 

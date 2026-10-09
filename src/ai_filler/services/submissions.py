@@ -117,6 +117,11 @@ def execute_schema_validation(form_version_def: dict[str, Any], data: dict[str, 
             except ValueError:
                 raise FieldConstraintError(field_key, "date", f"Field '{field_key}' must be in YYYY-MM-DD date format.")
 
+        elif field_type == "email":
+            EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+            if not isinstance(val, str) or "@" not in val or not EMAIL_REGEX.match(val.strip()):
+                raise FieldConstraintError(field_key, "email", f"Field '{field_key}' must be a valid email address containing '@' and a domain.")
+
         elif field_type == "dropdown":
             options = validation.get("options", [])
             if str(val) not in options:

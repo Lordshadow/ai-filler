@@ -1,4 +1,4 @@
-/* FormBuilder.css - Google Forms / MS Forms inspired styling */
+/* FormBuilder.css - Dynamic Form Builder styling */
 
 .fb-container {
   margin-top: 10px;
@@ -202,7 +202,7 @@
   margin-top: auto;
 }
 
-/* Editor Styling (Google Forms Style) */
+/* Editor Styling */
 .fb-editor {
   background: #f8fafc;
   border-radius: 16px;

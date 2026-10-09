@@ -25,6 +25,13 @@ class CSRFError(PermissionError):
 PASSWORD_RESET_MINUTES = 30
 PASSWORD_RESET_COOLDOWN_SECONDS = 60
 
+EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+
+
+def validate_email(email: str) -> None:
+    if not email or "@" not in email or not EMAIL_REGEX.match(email.strip()):
+        raise ValueError("A valid email address containing '@' and a domain is required.")
+
 
 def _public(identity: sqlite3.Row) -> dict[str, object]:
     return {
@@ -46,6 +53,7 @@ def signup(
     phone_number: str,
 ) -> dict[str, object]:
     email = email.strip().lower()
+    validate_email(email)
     if not full_name.strip() or not email or not date_of_birth or not phone_number.strip():
         raise ValueError("All required fields must be provided.")
     with connect() as db:
@@ -144,6 +152,7 @@ def create_organization_admin(
     email = email.strip().lower()
     full_name = full_name.strip()
     admin_id = admin_id.strip()
+    validate_email(email)
     if not all((organization_name, full_name, email, password, admin_id)):
         raise ValueError("All organization-admin fields are required.")
     with connect() as db:
@@ -352,6 +361,7 @@ def register_user(
     if not full_name or not email or not password:
         raise ValueError("All required fields must be provided.")
 
+    validate_email(email)
     validate_phone_e164(phone_number)
     validate_date_of_birth(date_of_birth, min_age=18)
 

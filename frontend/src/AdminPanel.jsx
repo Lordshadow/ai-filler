@@ -101,7 +101,7 @@ export default function AdminPanel() {
           className={`tab ${activeTab === "forms" ? "active" : ""}`}
           onClick={() => setActiveTab("forms")}
         >
-          📋 Dynamic Form Builder (Google Forms / MS Forms)
+          📋 Dynamic Form Builder
         </button>
         <button
           className={`tab ${activeTab === "users" ? "active" : ""}`}
@@ -117,7 +117,7 @@ export default function AdminPanel() {
         </button>
       </div>
 
-      {/* Tab 1: Google Forms Style Dynamic Form Builder */}
+      {/* Tab 1: Dynamic Form Builder */}
       {activeTab === "forms" && (
         <div className="panel-section">
           <FormBuilder adminRole="organization_admin" />
@@ -197,9 +197,11 @@ export default function AdminPanel() {
                 />
                 <input
                   type="email"
-                  placeholder="Email Address"
+                  placeholder="Email Address (e.g. user@example.com)"
                   value={newUser.email}
                   onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                  pattern="^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+                  title="Please enter a valid email address containing '@' and a domain (e.g. user@example.com)"
                   required
                 />
                 <input

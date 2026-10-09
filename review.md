@@ -68,13 +68,13 @@
 
 ### Audit Findings Matrix
 
-| Ref (File:Line) | Severity | Category | Issue & Evidence | Recommended Action / Status |
-| :--- | :--- | :--- | :--- | :--- |
-| `frontend/src/api.js:3` | RESOLVED | Cross-Site Host Mismatch | Hardcoded fallback to `http://127.0.0.1:8000` caused cross-site context whenever users accessed the frontend via `http://localhost:5173`, triggering browser cookie rejection under SameSite=Lax. | **Fixed**: Added dynamic `getApiBaseUrl()` resolving to `http://${window.location.hostname}:8000`, guaranteeing identical registrable site context. |
-| `frontend/vite.config.js:8` | RESOLVED | Dev Proxy / Same-Origin | Absence of Vite development proxy forced cross-origin network hops during local development. | **Fixed**: Added reverse proxy rules forwarding `/auth`, `/forms`, `/submissions`, `/transcribe`, `/format-application`, and `/extract-document` to `:8000`. |
-| `src/ai_filler/main.py:53` | RESOLVED | CORS Robustness | Strict static CORS origins list failed when Vite or client bound to alternate local dev ports (e.g. 5174, 3000). | **Fixed**: Added `allow_origin_regex` matching all `localhost` and `127.0.0.1` port configurations while blocking untrusted external origins. |
-| `src/ai_filler/main.py:93` | RESOLVED | Cookie Transport Security | `secure=True` cookie default caused plain HTTP development environments to reject session cookies across ports. | **Fixed**: Made `secure` cookie flag environment-aware: automatically `False` in local development/testing and `True` in production or when `AI_FILLER_COOKIE_SECURE=true`. Made `SameSite` configurable via `AI_FILLER_COOKIE_SAMESITE`. |
-| `tests/test_document_csrf.py:97` | RESOLVED | Regression Guard | Absence of automated validation for dynamic origin matching and cookie security flags. | **Fixed**: Added `TestCorsAndCookieSecurity` verifying origin regex allow/deny behavior and SameSite/Secure flag handling. |
+| Ref (File:Line)                  | Severity | Category                  | Issue & Evidence                                                                                                                                                                                  | Recommended Action / Status                                                                                                                                                                                                               |
+| :------------------------------- | :------- | :------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `frontend/src/api.js:3`          | RESOLVED | Cross-Site Host Mismatch  | Hardcoded fallback to `http://127.0.0.1:8000` caused cross-site context whenever users accessed the frontend via `http://localhost:5173`, triggering browser cookie rejection under SameSite=Lax. | **Fixed**: Added dynamic `getApiBaseUrl()` resolving to `http://${window.location.hostname}:8000`, guaranteeing identical registrable site context.                                                                                       |
+| `frontend/vite.config.js:8`      | RESOLVED | Dev Proxy / Same-Origin   | Absence of Vite development proxy forced cross-origin network hops during local development.                                                                                                      | **Fixed**: Added reverse proxy rules forwarding `/auth`, `/forms`, `/submissions`, `/transcribe`, `/format-application`, and `/extract-document` to `:8000`.                                                                              |
+| `src/ai_filler/main.py:53`       | RESOLVED | CORS Robustness           | Strict static CORS origins list failed when Vite or client bound to alternate local dev ports (e.g. 5174, 3000).                                                                                  | **Fixed**: Added `allow_origin_regex` matching all `localhost` and `127.0.0.1` port configurations while blocking untrusted external origins.                                                                                             |
+| `src/ai_filler/main.py:93`       | RESOLVED | Cookie Transport Security | `secure=True` cookie default caused plain HTTP development environments to reject session cookies across ports.                                                                                   | **Fixed**: Made `secure` cookie flag environment-aware: automatically `False` in local development/testing and `True` in production or when `AI_FILLER_COOKIE_SECURE=true`. Made `SameSite` configurable via `AI_FILLER_COOKIE_SAMESITE`. |
+| `tests/test_document_csrf.py:97` | RESOLVED | Regression Guard          | Absence of automated validation for dynamic origin matching and cookie security flags.                                                                                                            | **Fixed**: Added `TestCorsAndCookieSecurity` verifying origin regex allow/deny behavior and SameSite/Secure flag handling.                                                                                                                |
 
 ### Verification Sign-Off
 - [x] **Deterministic CLI Gate**: `pytest tests/test_document_csrf.py tests/test_platform_workflows.py tests/test_auth_api.py` PASSED (18/18).
@@ -82,3 +82,30 @@
 - [x] **Git Cleanliness**: `git diff --check` PASSED with 0 whitespace or merge conflicts.
 - [x] **Logic & Contract Integrity**: Host alignment matches browser origin dynamically; proxy enables optional same-origin requests.
 - [x] **Security & Access Boundaries**: SameSite=Lax maintained for CSRF defense; secure cookies enforced for production HTTPS.
+---
+
+## [Log Entry #4] 2026-10-09 15:59:00 UTC - Dedicated Email Field Type, Strict '@' Validation & Brand Neutral UI Refactoring
+
+### Metadata
+- **Summary**: Implemented dedicated 'email' question type in FormBuilder with strict format and '@' validation, enforced server-side email validation across form submissions and user provisioning, and removed third-party references ('Google Forms / MS Forms') from all UI surfaces.
+- **Delta**: 8 files changed (+154/-11) across frontend FormBuilder, AdminPanel, SuperAdminPanel, FormBuilder CSS, backend forms, submissions, auth services, and automated platform workflow tests.
+- **Deterministic Gate**: PASS (Tests: 19/19 passed [7 platform workflows + 4 CSRF/CORS integration + 8 Auth API], Frontend Vite Build: 0 errors).
+
+### Audit Findings Matrix
+
+| Ref (File:Line) | Severity | Category | Issue & Evidence | Recommended Action / Status |
+| :--- | :--- | :--- | :--- | :--- |
+| `frontend/src/FormBuilder.jsx:6` | RESOLVED | Missing Capability | FormBuilder lacked a dedicated 'email' question type; users relied on generic text fields without automatic email format or '@' enforcement. | **Fixed**: Added 'email' as first-class option in `FIELD_TYPES`, auto-configuring email regex and HTML5 `<input type="email">`. |
+| `frontend/src/FormBuilder.jsx:585` | RESOLVED | Input Validation | Live preview test modal allowed entering strings without '@' and successfully submitting. | **Fixed**: Enforced HTML5 pattern validation and JavaScript client-side validation checking for '@' and valid domain format on preview submit. |
+| `src/ai_filler/services/forms.py:10` | RESOLVED | Contract Alignment | `SUPPORTED_FIELD_TYPES` did not recognize 'email', preventing backend persistence of email-typed form versions. | **Fixed**: Added 'email' to `SUPPORTED_FIELD_TYPES` with default regex `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`. |
+| `src/ai_filler/services/submissions.py:120` | RESOLVED | Server Validation | `execute_schema_validation` had no dedicated email validator, allowing malformed strings through if custom regex was omitted. | **Fixed**: Added dedicated validation branch checking for '@' and RFC-compliant format; raises `FieldConstraintError` if invalid. |
+| `src/ai_filler/auth/service.py:28` | RESOLVED | Data Quality | `signup`, `register_user`, and `create_organization_admin` lacked strict email format validation, accepting emails without '@'. | **Fixed**: Added `validate_email()` enforcing strict '@' and domain requirements across all user/admin provisioning endpoints. |
+| `frontend/src/AdminPanel.jsx:104` | RESOLVED | Brand & UI Cleanup | UI tabs and descriptions referenced third-party proprietary brands ('Google Forms / MS Forms'). | **Fixed**: Removed third-party brand names across AdminPanel, SuperAdminPanel, FormBuilder header, and CSS stylesheets. |
+| `tests/test_platform_workflows.py:433` | RESOLVED | Regression Guard | Absence of end-to-end integration test validating email field creation, invalid submission rejection, and user registration email validation. | **Fixed**: Added `test_email_field_type_validation_and_registration` covering positive and negative cases. |
+
+### Verification Sign-Off
+- [x] **Deterministic CLI Gate**: `pytest tests/test_platform_workflows.py tests/test_document_csrf.py tests/test_auth_api.py` PASSED (19/19).
+- [x] **Frontend Production Build**: `npm --prefix frontend run build` compiled in 867ms with 0 errors.
+- [x] **Git Cleanliness**: `git diff --check` PASSED with 0 whitespace or merge conflicts.
+- [x] **Logic & Contract Integrity**: Dedicated email field type supported end-to-end; strings without '@' strictly rejected.
+- [x] **UI Polish**: All references to 'Google Forms / MS Forms' cleanly removed.

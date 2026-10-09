@@ -428,3 +428,74 @@ def test_application_multi_tier_query_views(test_setup):
     super_all = client.get("/applications/all", headers=super_headers)
     assert super_all.status_code == 200
     assert isinstance(super_all.json()["applications"], list)
+
+
+def test_email_field_type_validation_and_registration(test_setup):
+    admin_headers = test_setup["admin_headers"]
+    user_headers = test_setup["user_headers"]
+    form_id = f"frm_email_{uuid.uuid4().hex[:8]}"
+
+    # 1. Admin creates form with dedicated "email" field type
+    create_resp = client.post(
+        "/forms",
+        json={
+            "form_id": form_id,
+            "title": "Email Test Form",
+            "description": "Form with email field",
+            "publish": True,
+            "fields": [
+                {
+                    "fieldKey": "applicant_email",
+                    "type": "email",
+                    "label": "Applicant Email",
+                    "required": True,
+                }
+            ],
+        },
+        headers=admin_headers,
+    )
+    assert create_resp.status_code == 201, create_resp.text
+    created = create_resp.json()["form"]
+    assert created["fields"][0]["type"] == "email"
+
+    # 2. Submitting without "@" fails with 422 FieldConstraintError
+    bad_sub = client.post(
+        "/applications",
+        json={
+            "form_id": form_id,
+            "form_version": 1,
+            "data": {"applicant_email": "myemailwithoutat"},
+        },
+        headers={**user_headers, "Idempotency-Key": f"idem_{uuid.uuid4().hex}"},
+    )
+    assert bad_sub.status_code == 422
+    assert "email" in bad_sub.text
+    assert "@" in bad_sub.text
+
+    # 3. Submitting with valid email succeeds
+    good_sub = client.post(
+        "/applications",
+        json={
+            "form_id": form_id,
+            "form_version": 1,
+            "data": {"applicant_email": "jane.doe@example.com"},
+        },
+        headers={**user_headers, "Idempotency-Key": f"idem_{uuid.uuid4().hex}"},
+    )
+    assert good_sub.status_code == 201
+
+    # 4. Provisioning/registering user with invalid email without "@" fails with 400
+    bad_reg = client.post(
+        "/auth/register",
+        json={
+            "full_name": "Invalid Email User",
+            "email": "notanemail",
+            "password": "Password123!",
+            "date_of_birth": "1995-01-01",
+            "phone_number": "+14155552671",
+            "organization_id": test_setup["org_admin"]["organization_id"],
+            "role": "user",
+        },
+    )
+    assert bad_reg.status_code == 400
+    assert "@" in bad_reg.json()["detail"]

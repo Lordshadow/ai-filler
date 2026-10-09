@@ -4,6 +4,7 @@ import "./FormBuilder.css";
 
 const FIELD_TYPES = [
   { value: "text", label: "📝 Short Text", desc: "Names, addresses, codes" },
+  { value: "email", label: "✉️ Email Address", desc: "Applicant contact email" },
   { value: "number", label: "🔢 Number", desc: "Age, income, quantities" },
   { value: "date", label: "📅 Date Picker", desc: "Date of birth, deadlines" },
   { value: "dropdown", label: "▾ Dropdown Select", desc: "Single selection from list" },
@@ -77,7 +78,7 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
         {
           id: "q_2",
           fieldKey: "contact_email",
-          type: "text",
+          type: "email",
           label: "Contact Email Address",
           required: true,
           validation: { regex: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$" },
@@ -244,7 +245,7 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
             <div>
               <h2>Form Templates & Workflows</h2>
               <p style={{ margin: "4px 0 0", color: "#64748b", fontSize: "14px" }}>
-                Create, customize, and manage dynamic questionnaires (Google Forms / MS Forms style).
+                Create, customize, and manage dynamic questionnaires.
               </p>
             </div>
             <div className="fb-header-actions">
@@ -378,7 +379,12 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
                     onChange={(e) => {
                       const newType = e.target.value;
                       const updates = { type: newType };
-                      if (["dropdown", "multiselect"].includes(newType) && (!field.validation?.options || field.validation.options.length === 0)) {
+                      if (newType === "email") {
+                        updates.validation = {
+                          ...field.validation,
+                          regex: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+                        };
+                      } else if (["dropdown", "multiselect"].includes(newType) && (!field.validation?.options || field.validation.options.length === 0)) {
                         updates.validation = { ...field.validation, options: ["Option 1", "Option 2"] };
                       }
                       handleUpdateField(idx, updates);
@@ -394,6 +400,13 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
 
                 {/* Question Type Body */}
                 <div className="fb-q-body">
+                  {/* Email Format Indicator */}
+                  {field.type === "email" && (
+                    <div style={{ marginBottom: "12px", padding: "8px 12px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "6px", fontSize: "12px", color: "#166534" }}>
+                      ✉️ <strong>Email Address Field:</strong> Automatically enforces valid email format with '@' and domain name (e.g. user@example.com).
+                    </div>
+                  )}
+
                   {/* Dropdown & Multiselect Options */}
                   {["dropdown", "multiselect"].includes(field.type) && (
                     <div>
@@ -571,7 +584,31 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
               <p style={{ margin: 0, color: "#64748b" }}>{previewForm.description}</p>
             </div>
 
-            <form onSubmit={(e) => { e.preventDefault(); alert("Form validation passed! Preview successful."); }}>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+                for (const field of previewForm.fields) {
+                  const val = formData.get(field.fieldKey);
+                  if (field.type === "email" && val) {
+                    const strVal = val.toString().trim();
+                    if (!strVal.includes("@") || !emailRegex.test(strVal)) {
+                      alert(`Validation Error: '${field.label}' must be a valid email containing '@' and a domain (e.g. name@example.com).`);
+                      return;
+                    }
+                  }
+                  if (field.validation?.regex && val) {
+                    const reg = new RegExp(field.validation.regex);
+                    if (!reg.test(val.toString())) {
+                      alert(`Validation Error: '${field.label}' failed pattern validation.`);
+                      return;
+                    }
+                  }
+                }
+                alert("Form validation passed! Preview successful.");
+              }}
+            >
               {previewForm.fields.map((field, idx) => (
                 <div key={idx} className="fb-preview-field">
                   <label className="fb-preview-label">
@@ -582,10 +619,23 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
                   {field.type === "text" && (
                     <input
                       type="text"
+                      name={field.fieldKey}
                       className="fb-preview-input"
                       placeholder={`Enter ${field.label.toLowerCase()}`}
                       required={field.required}
                       pattern={field.validation?.regex}
+                    />
+                  )}
+
+                  {field.type === "email" && (
+                    <input
+                      type="email"
+                      name={field.fieldKey}
+                      className="fb-preview-input"
+                      placeholder="name@example.com"
+                      required={field.required}
+                      pattern={field.validation?.regex || "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"}
+                      title="Please enter a valid email address containing '@' and a domain (e.g. name@example.com)"
                     />
                   )}
 

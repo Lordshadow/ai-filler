@@ -7,8 +7,9 @@ from typing import Any
 
 from ai_filler.auth.db import connect
 
-SUPPORTED_FIELD_TYPES = {"text", "number", "date", "dropdown", "multiselect", "file"}
+SUPPORTED_FIELD_TYPES = {"text", "email", "number", "date", "dropdown", "multiselect", "file"}
 SAFE_FIELD_KEY_REGEX = re.compile(r"^[a-zA-Z0-9_]{2,64}$")
+DEFAULT_EMAIL_REGEX = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
 
 
 def validate_field_definition(field: dict[str, Any]) -> dict[str, Any]:
@@ -28,6 +29,10 @@ def validate_field_definition(field: dict[str, Any]) -> dict[str, Any]:
     validation = field.get("validation") or {}
     if not isinstance(validation, dict):
         raise ValueError(f"Field '{field_key}' validation must be an object.")
+
+    # Email field defaults to standard email regex if none specified
+    if field_type == "email" and "regex" not in validation:
+        validation["regex"] = DEFAULT_EMAIL_REGEX
 
     # Validate regex if present
     regex_pattern = validation.get("regex")
