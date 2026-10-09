@@ -1,0 +1,27 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Local environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Local SQLite databases and session files
+data/*.db
+data/*.db-wal
+data/*.db-shm
+:memory:.ses
+*.ses
+
+# Test and frontend artifacts
+.pytest_cache/
+frontend/node_modules/
+frontend/dist/
