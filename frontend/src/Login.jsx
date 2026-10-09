@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { apiUrl, authFetch } from "./api";
+import { authFetch } from "./api";
 import "./Auth.css";
 
 const ROLE_CONFIGS = {
@@ -40,7 +40,6 @@ const ROLE_CONFIGS = {
 };
 
 export default function Login({ role: initialRole = "user" }) {
-  const [selectedRole, setSelectedRole] = useState(initialRole);
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -49,45 +48,63 @@ export default function Login({ role: initialRole = "user" }) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // If path is /admin/login or /super-admin/login, sync selectedRole
-  useEffect(() => {
-    if (location.pathname.includes("/super-admin")) {
-      setSelectedRole("super_admin");
-    } else if (location.pathname.includes("/admin")) {
-      setSelectedRole("admin");
-    } else {
-      setSelectedRole(initialRole || "user");
-    }
-  }, [location.pathname, initialRole]);
+  const selectedRole = location.pathname.includes("/super-admin")
+    ? "super_admin"
+    : location.pathname.includes("/admin")
+      ? "admin"
+      : initialRole || "user";
 
   // Check if session already active -> auto-route to dashboard
   useEffect(() => {
+    let isMounted = true;
     const checkActiveSession = async () => {
       try {
-        const response = await fetch(apiUrl("/auth/me"), {
+        const response = await authFetch("/auth/me", {
           method: "GET",
-          credentials: "include",
         });
-        if (response.ok) {
+        if (response.ok && isMounted) {
           const data = await response.json();
           const kind = data.user?.kind;
-          if (kind === "super_admin") {
-            navigate("/super-admin-panel");
-          } else if (kind === "organization_admin") {
-            navigate("/admin-panel");
-          } else if (kind === "user") {
-            navigate("/voice");
+          const isSuperAdminRoute = location.pathname.includes("/super-admin");
+          const isAdminRoute = location.pathname.includes("/admin") && !isSuperAdminRoute;
+
+          if (isSuperAdminRoute) {
+            if (kind === "super_admin") {
+              navigate("/super-admin-panel", { replace: true });
+              return;
+            }
+          } else if (isAdminRoute) {
+            if (kind === "organization_admin" || kind === "super_admin") {
+              navigate("/admin-panel", { replace: true });
+              return;
+            }
+          } else {
+            if (kind === "super_admin") {
+              navigate("/super-admin-panel", { replace: true });
+              return;
+            } else if (kind === "organization_admin") {
+              navigate("/admin-panel", { replace: true });
+              return;
+            } else if (kind === "user") {
+              navigate("/voice", { replace: true });
+              return;
+            }
           }
         }
       } catch {
         // Not authenticated, stay on login page
       } finally {
-        setCheckingSession(false);
+        if (isMounted) {
+          setCheckingSession(false);
+        }
       }
     };
 
     checkActiveSession();
-  }, [navigate]);
+    return () => {
+      isMounted = false;
+    };
+  }, [navigate, location.pathname]);
 
   const activeConfig = ROLE_CONFIGS[selectedRole] || ROLE_CONFIGS.user;
 
@@ -96,10 +113,8 @@ export default function Login({ role: initialRole = "user" }) {
     setError("");
     setLoading(true);
     try {
-      const response = await fetch(apiUrl(activeConfig.endpoint), {
+      const response = await authFetch(activeConfig.endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify({ identifier, password }),
       });
       if (!response.ok) {

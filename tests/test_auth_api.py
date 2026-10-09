@@ -148,3 +148,52 @@ class TestLogoutAPI:
         })
         assert login_response.status_code == 200
         assert client.post("/auth/logout").status_code == 403
+
+
+class TestRoleSessionTransition:
+    """Test session transitions between user, organization admin, and super admin."""
+
+    def test_user_to_admin_session_overwrite(self):
+        from ai_filler.auth.service import create_organization_admin
+
+        session_client = TestClient(app)
+        signup_resp = session_client.post(
+            "/auth/signup",
+            json={
+                "full_name": "Applicant Bob",
+                "email": "bob@example.com",
+                "password": "SecurePassword123!",
+                "date_of_birth": "1992-04-12",
+                "phone_number": "+14155551234",
+            },
+        )
+        assert signup_resp.status_code == 200
+
+        login_resp = session_client.post(
+            "/auth/user/login",
+            json={"identifier": "bob@example.com", "password": "SecurePassword123!"},
+        )
+        assert login_resp.status_code == 200
+
+        me_user = session_client.get("/auth/me")
+        assert me_user.status_code == 200
+        assert me_user.json()["user"]["kind"] == "user"
+
+        create_organization_admin(
+            organization_name="Transition Corp",
+            full_name="Admin Transition",
+            email="transition_admin@corp.com",
+            password="AdminPass456!",
+            admin_id="ADM-TRANS01",
+        )
+
+        admin_login_resp = session_client.post(
+            "/auth/admin/login",
+            json={"identifier": "ADM-TRANS01", "password": "AdminPass456!"},
+        )
+        assert admin_login_resp.status_code == 200
+        assert admin_login_resp.json()["user"]["kind"] == "organization_admin"
+
+        me_admin = session_client.get("/auth/me")
+        assert me_admin.status_code == 200
+        assert me_admin.json()["user"]["kind"] == "organization_admin"

@@ -109,3 +109,28 @@
 - [x] **Git Cleanliness**: `git diff --check` PASSED with 0 whitespace or merge conflicts.
 - [x] **Logic & Contract Integrity**: Dedicated email field type supported end-to-end; strings without '@' strictly rejected.
 - [x] **UI Polish**: All references to 'Google Forms / MS Forms' cleanly removed.
+---
+
+## [Log Entry #5] 2026-10-09 16:15:00 UTC - Route-Aware Session Routing & Role-Enforced Protected Routes (Resolving Admin Redirection to Voice)
+
+### Metadata
+- **Summary**: Resolved routing defect where active applicant/user sessions caused admin endpoints (`/admin`, `/admin/login`, and `/admin-panel`) to unexpectedly redirect to `/voice`. Implemented route-aware auto-routing in `Login.jsx`, role-based authorization in `ProtectedRoute` (`App.jsx`), explicit convenience redirects for `/admin` and `/super-admin`, unified `authFetch` integration, and automated session transition tests.
+- **Delta**: 5 files changed (+144/-49) across frontend Login, App router, AdminPanel, SuperAdminPanel, and backend auth API tests.
+- **Deterministic Gate**: PASS (Tests: 20/20 passed [7 platform workflows + 4 CSRF/CORS integration + 9 Auth API], Frontend Vite Build: 0 errors).
+
+### Audit Findings Matrix
+
+| Ref (File:Line) | Severity | Category | Issue & Evidence | Recommended Action / Status |
+| :--- | :--- | :--- | :--- | :--- |
+| `frontend/src/Login.jsx:64` | HIGH | Routing / Session Hijack | `checkActiveSession` unconditionally navigated to `/voice` whenever `kind === "user"`, even when the user deliberately visited `/admin/login` or `/super-admin/login`. | **Fixed**: Made session auto-routing route-aware: on admin routes, non-admin sessions remain on the admin login page so administrative credentials can be entered without being bounced to `/voice`. |
+| `frontend/src/App.jsx:14` | MEDIUM | Access Control / UX | `ProtectedRoute` only verified `response.ok`, allowing applicant user sessions to mount administrative components before secondary component-level checks kicked them out. | **Fixed**: Added `allowedRoles` prop to `ProtectedRoute`, cleanly navigating unauthorized roles directly to `loginPath` before rendering target panels. |
+| `frontend/src/App.jsx:43` | LOW | Routing Convenience | Navigating to `/admin` or `/super-admin` directly produced blank pages because React Router had no root route match for those paths. | **Fixed**: Added dedicated redirect routes `<Route path="/admin" element={<Navigate to="/admin/login" replace />} />` and `<Route path="/super-admin" element={<Navigate to="/super-admin/login" replace />} />`. |
+| `frontend/src/AdminPanel.jsx:26` | LOW | Code Cleanliness / API Unification | `AdminPanel` used raw `fetch(apiUrl(...))` rather than unified `authFetch`, and lacked unmount abort safety. | **Fixed**: Migrated to `authFetch("/auth/me")` and added `isMounted` guard flag to prevent state updates on unmounted components. |
+| `tests/test_auth_api.py:155` | MEDIUM | Regression Guard | Lack of automated integration test verifying that logging into an admin account cleanly overwrites an existing user cookie session. | **Fixed**: Implemented `TestRoleSessionTransition` verifying user-to-admin session cookie transitions and `/auth/me` identity updates. |
+
+### Verification Sign-Off
+- [x] **Deterministic CLI Gate**: `pytest tests/test_platform_workflows.py tests/test_document_csrf.py tests/test_auth_api.py` PASSED (20/20).
+- [x] **Frontend Production Build**: `npm --prefix frontend run build` compiled in 697ms with 0 errors.
+- [x] **Git Cleanliness**: `git diff --check` PASSED with 0 whitespace or merge conflicts.
+- [x] **Logic & Contract Integrity**: Admin endpoints (`/admin`, `/admin/login`, `/admin-panel`) render properly and do not bounce users to `/voice`.
+- [x] **Access Control**: Role restrictions strictly enforced across applicant, organization admin, and super admin portals.

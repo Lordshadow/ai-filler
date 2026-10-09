@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiUrl, authFetch } from "./api";
+import { authFetch } from "./api";
 import "./Auth.css";
 import FormBuilder from "./FormBuilder";
 
@@ -21,32 +21,35 @@ export default function AdminPanel() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    let isMounted = true;
     const fetchAdmin = async () => {
       try {
-        const response = await fetch(apiUrl("/auth/me"), {
+        const response = await authFetch("/auth/me", {
           method: "GET",
-          credentials: "include",
         });
 
         if (!response.ok) {
-          navigate("/admin/login");
+          if (isMounted) navigate("/admin/login", { replace: true });
           return;
         }
 
         const data = await response.json();
         if (data.user.kind !== "organization_admin" && data.user.kind !== "super_admin") {
-          navigate("/admin/login");
+          if (isMounted) navigate("/admin/login", { replace: true });
           return;
         }
-        setAdmin(data.user);
+        if (isMounted) setAdmin(data.user);
       } catch (err) {
-        setError(err.message);
+        if (isMounted) setError(err.message);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     };
 
     fetchAdmin();
+    return () => {
+      isMounted = false;
+    };
   }, [navigate]);
 
   const handleLogout = async () => {

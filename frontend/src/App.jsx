@@ -9,31 +9,56 @@ import AdminPanel from './AdminPanel'
 import SuperAdminPanel from './SuperAdminPanel'
 import VoicePage from './VoicePage'
 import DocumentsPage from './DocumentsPage'
-import { apiUrl } from './api'
+import { authFetch } from './api'
 
-function ProtectedRoute({ children, loginPath = '/login' }) {
+function ProtectedRoute({ children, loginPath = '/login', allowedRoles = null }) {
   const [isAuthenticated, setIsAuthenticated] = useState(null)
   const navigate = useNavigate()
 
   useEffect(() => {
+    let isMounted = true
     const checkAuth = async () => {
       try {
-        const response = await fetch(apiUrl('/auth/me'), {
+        const response = await authFetch('/auth/me', {
           method: 'GET',
-          credentials: 'include',
         })
-        setIsAuthenticated(response.ok)
         if (!response.ok) {
-          navigate(loginPath)
+          if (isMounted) {
+            setIsAuthenticated(false)
+            navigate(loginPath, { replace: true })
+          }
+          return
+        }
+
+        const data = await response.json()
+        const userKind = data.user?.kind
+
+        if (allowedRoles && allowedRoles.length > 0) {
+          if (!allowedRoles.includes(userKind)) {
+            if (isMounted) {
+              setIsAuthenticated(false)
+              navigate(loginPath, { replace: true })
+            }
+            return
+          }
+        }
+
+        if (isMounted) {
+          setIsAuthenticated(true)
         }
       } catch {
-        setIsAuthenticated(false)
-        navigate(loginPath)
+        if (isMounted) {
+          setIsAuthenticated(false)
+          navigate(loginPath, { replace: true })
+        }
       }
     }
 
     checkAuth()
-  }, [navigate, loginPath])
+    return () => {
+      isMounted = false
+    }
+  }, [navigate, loginPath, allowedRoles])
 
   if (isAuthenticated === null) return <div className="loading">Loading...</div>
   if (!isAuthenticated) return null
@@ -44,6 +69,8 @@ function App() {
   return (
     <Router>
       <Routes>
+        <Route path="/admin" element={<Navigate to="/admin/login" replace />} />
+        <Route path="/super-admin" element={<Navigate to="/super-admin/login" replace />} />
         <Route path="/login" element={<Login role="user" />} />
         <Route path="/admin/login" element={<Login role="admin" />} />
         <Route path="/super-admin/login" element={<Login role="super_admin" />} />
@@ -53,7 +80,7 @@ function App() {
         <Route
           path="/voice"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={['user', 'organization_admin', 'super_admin']} loginPath="/login">
               <VoicePage />
             </ProtectedRoute>
           }
@@ -61,7 +88,7 @@ function App() {
         <Route
           path="/documents"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={['user', 'organization_admin', 'super_admin']} loginPath="/login">
               <DocumentsPage />
             </ProtectedRoute>
           }
@@ -69,7 +96,7 @@ function App() {
         <Route
           path="/user-panel"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={['user']} loginPath="/login">
               <UserPanel />
             </ProtectedRoute>
           }
@@ -77,7 +104,7 @@ function App() {
         <Route
           path="/admin-panel"
           element={
-            <ProtectedRoute loginPath="/admin/login">
+            <ProtectedRoute allowedRoles={['organization_admin', 'super_admin']} loginPath="/admin/login">
               <AdminPanel />
             </ProtectedRoute>
           }
@@ -85,7 +112,7 @@ function App() {
         <Route
           path="/super-admin-panel"
           element={
-            <ProtectedRoute loginPath="/super-admin/login">
+            <ProtectedRoute allowedRoles={['super_admin']} loginPath="/super-admin/login">
               <SuperAdminPanel />
             </ProtectedRoute>
           }

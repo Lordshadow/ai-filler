@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiUrl, authFetch } from "./api";
+import { authFetch } from "./api";
 import "./Auth.css";
 import FormBuilder from "./FormBuilder";
 
