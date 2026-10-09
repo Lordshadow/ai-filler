@@ -51,6 +51,7 @@ cors_origins = [origin.strip() for origin in os.getenv(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$",
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     allow_credentials=True,
@@ -91,14 +92,31 @@ class PasswordResetConfirmRequest(BaseModel):
 
 
 def _set_session(response: Response, result: dict[str, object]) -> None:
-    secure_cookie = os.getenv("AI_FILLER_COOKIE_SECURE", "true").lower() in {"1", "true", "yes"}
+    env_secure = os.getenv("AI_FILLER_COOKIE_SECURE")
+    if env_secure is not None:
+        secure_cookie = env_secure.lower() in {"1", "true", "yes"}
+    else:
+        secure_cookie = os.getenv("ENVIRONMENT", "development").lower() == "production"
+
+    samesite_cookie = os.getenv("AI_FILLER_COOKIE_SAMESITE", "lax").lower()
+    if samesite_cookie not in {"lax", "strict", "none"}:
+        samesite_cookie = "lax"
+
     response.set_cookie(
-        "session_token", str(result["token"]), httponly=True, secure=secure_cookie,
-        samesite="lax", max_age=7 * 24 * 60 * 60,
+        "session_token",
+        str(result["token"]),
+        httponly=True,
+        secure=secure_cookie,
+        samesite=samesite_cookie,
+        max_age=7 * 24 * 60 * 60,
     )
     response.set_cookie(
-        "csrf_token", str(result["csrf_token"]), httponly=False, secure=secure_cookie,
-        samesite="lax", max_age=7 * 24 * 60 * 60,
+        "csrf_token",
+        str(result["csrf_token"]),
+        httponly=False,
+        secure=secure_cookie,
+        samesite=samesite_cookie,
+        max_age=7 * 24 * 60 * 60,
     )
 
 

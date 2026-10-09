@@ -93,3 +93,52 @@ class TestCsrfProtectionEndpoints:
             )
             assert resp_fmt_ok.status_code == 200
             assert resp_fmt_ok.json()["application"]["full_name"] == "Jane Doe"
+
+
+class TestCorsAndCookieSecurity:
+    """Verifies that CORS correctly handles dynamic origins and cookie security flags."""
+
+    def test_cors_dynamic_origin_regex(self):
+        # Localhost on any port
+        resp1 = client.options(
+            "/auth/signup",
+            headers={"Origin": "http://localhost:5174", "Access-Control-Request-Method": "POST"},
+        )
+        assert resp1.headers.get("access-control-allow-origin") == "http://localhost:5174"
+
+        # 127.0.0.1 on any port
+        resp2 = client.options(
+            "/auth/signup",
+            headers={"Origin": "http://127.0.0.1:3000", "Access-Control-Request-Method": "POST"},
+        )
+        assert resp2.headers.get("access-control-allow-origin") == "http://127.0.0.1:3000"
+
+        # Unauthorized third-party origin
+        resp_unauth = client.options(
+            "/auth/signup",
+            headers={"Origin": "https://unauthorized-domain.com", "Access-Control-Request-Method": "POST"},
+        )
+        assert resp_unauth.headers.get("access-control-allow-origin") is None
+
+    def test_cookie_samesite_and_secure_flags(self, monkeypatch):
+        # Test explicit samesite configuration
+        monkeypatch.setenv("AI_FILLER_COOKIE_SAMESITE", "lax")
+        monkeypatch.setenv("AI_FILLER_COOKIE_SECURE", "false")
+        client.post(
+            "/auth/signup",
+            json={
+                "full_name": "Bob",
+                "email": "bob@example.com",
+                "password": "Password123",
+                "date_of_birth": "1990-01-01",
+                "phone_number": "1234567890",
+            },
+        )
+        resp = client.post(
+            "/auth/user/login",
+            json={"identifier": "bob@example.com", "password": "Password123"},
+        )
+        assert resp.status_code == 200
+        set_cookies = resp.headers.get_list("set-cookie")
+        assert any("samesite=lax" in c.lower() for c in set_cookies)
+        assert not any("; secure" in c.lower() for c in set_cookies)

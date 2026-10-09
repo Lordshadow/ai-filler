@@ -1,6 +1,23 @@
 const configuredBase = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL;
-export const API_BASE_URL = (configuredBase || "http://127.0.0.1:8000").replace(/\/$/, "");
-export const apiUrl = (path) => `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
+
+export function getApiBaseUrl() {
+  if (configuredBase) {
+    return configuredBase.replace(/\/$/, "");
+  }
+  if (typeof window !== "undefined" && window.location) {
+    const hostname = window.location.hostname || "127.0.0.1";
+    return `http://${hostname}:8000`;
+  }
+  return "http://127.0.0.1:8000";
+}
+
+export const API_BASE_URL = getApiBaseUrl();
+
+export const apiUrl = (path) => {
+  if (/^https?:\/\//i.test(path)) return path;
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${getApiBaseUrl()}${normalizedPath}`;
+};
 
 export function getCsrfToken() {
   if (typeof document === "undefined" || !document.cookie) {

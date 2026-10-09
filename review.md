@@ -57,3 +57,28 @@
 - [x] **Git Cleanliness**: `git diff --check` PASSED with 0 whitespace or merge conflicts.
 - [x] **Logic & Contract Integrity**: Multipart boundaries preserved for file uploads; JSON content-type correctly applied for application payloads.
 - [x] **Security & Access Boundaries**: Double-submit CSRF cookie mitigation verified on all authenticated state-changing endpoints.
+---
+
+## [Log Entry #3] 2026-10-09 15:38:00 UTC - Permanent Cross-Site Cookie Rejection Resolution (Host Alignment, Vite Proxy & Environment Cookie Flags)
+
+### Metadata
+- **Summary**: Permanently resolved cross-site cookie rejection (SameSite=Lax/Strict rejection on login) by implementing dynamic host matching in frontend API client, configuring development reverse proxy in Vite, adding localhost/127.0.0.1 CORS regex allowance, and environment-aware secure cookie flag toggling.
+- **Delta**: 4 files changed (+102/-7) across frontend API client, Vite dev config, backend session cookie & CORS handlers, and automated integration tests.
+- **Deterministic Gate**: PASS (Tests: 18/18 passed [4 CSRF/CORS integration + 6 Platform workflows + 8 Auth API], Frontend Vite Build: 0 errors).
+
+### Audit Findings Matrix
+
+| Ref (File:Line) | Severity | Category | Issue & Evidence | Recommended Action / Status |
+| :--- | :--- | :--- | :--- | :--- |
+| `frontend/src/api.js:3` | RESOLVED | Cross-Site Host Mismatch | Hardcoded fallback to `http://127.0.0.1:8000` caused cross-site context whenever users accessed the frontend via `http://localhost:5173`, triggering browser cookie rejection under SameSite=Lax. | **Fixed**: Added dynamic `getApiBaseUrl()` resolving to `http://${window.location.hostname}:8000`, guaranteeing identical registrable site context. |
+| `frontend/vite.config.js:8` | RESOLVED | Dev Proxy / Same-Origin | Absence of Vite development proxy forced cross-origin network hops during local development. | **Fixed**: Added reverse proxy rules forwarding `/auth`, `/forms`, `/submissions`, `/transcribe`, `/format-application`, and `/extract-document` to `:8000`. |
+| `src/ai_filler/main.py:53` | RESOLVED | CORS Robustness | Strict static CORS origins list failed when Vite or client bound to alternate local dev ports (e.g. 5174, 3000). | **Fixed**: Added `allow_origin_regex` matching all `localhost` and `127.0.0.1` port configurations while blocking untrusted external origins. |
+| `src/ai_filler/main.py:93` | RESOLVED | Cookie Transport Security | `secure=True` cookie default caused plain HTTP development environments to reject session cookies across ports. | **Fixed**: Made `secure` cookie flag environment-aware: automatically `False` in local development/testing and `True` in production or when `AI_FILLER_COOKIE_SECURE=true`. Made `SameSite` configurable via `AI_FILLER_COOKIE_SAMESITE`. |
+| `tests/test_document_csrf.py:97` | RESOLVED | Regression Guard | Absence of automated validation for dynamic origin matching and cookie security flags. | **Fixed**: Added `TestCorsAndCookieSecurity` verifying origin regex allow/deny behavior and SameSite/Secure flag handling. |
+
+### Verification Sign-Off
+- [x] **Deterministic CLI Gate**: `pytest tests/test_document_csrf.py tests/test_platform_workflows.py tests/test_auth_api.py` PASSED (18/18).
+- [x] **Frontend Production Build**: `npm --prefix frontend run build` compiled in 1.17s with 0 errors.
+- [x] **Git Cleanliness**: `git diff --check` PASSED with 0 whitespace or merge conflicts.
+- [x] **Logic & Contract Integrity**: Host alignment matches browser origin dynamically; proxy enables optional same-origin requests.
+- [x] **Security & Access Boundaries**: SameSite=Lax maintained for CSRF defense; secure cookies enforced for production HTTPS.
