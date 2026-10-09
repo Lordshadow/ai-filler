@@ -317,6 +317,8 @@ async def extract_document_endpoint(
         return process_documents(documents=extracted_documents)
     except (RuntimeError, ValueError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=f"Document processing failed: {error}") from error
     finally:
         for temporary_path in temporary_paths:
             temporary_path.unlink(missing_ok=True)

@@ -3,24 +3,48 @@ export const API_BASE_URL = (configuredBase || "http://127.0.0.1:8000").replace(
 export const apiUrl = (path) => `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 
 export function getCsrfToken() {
-  const match = document.cookie
-    .split(";")
-    .map((c) => c.trim())
-    .find((c) => c.startsWith("csrf_token="));
-  return match ? decodeURIComponent(match.slice("csrf_token=".length)) : null;
+  if (typeof document === "undefined" || !document.cookie) {
+    return null;
+  }
+  const cookies = document.cookie.split(";");
+  for (const cookie of cookies) {
+    const trimmed = cookie.trim();
+    if (trimmed.startsWith("csrf_token=")) {
+      let rawVal = trimmed.slice("csrf_token=".length);
+      if (rawVal.startsWith('"') && rawVal.endsWith('"')) {
+        rawVal = rawVal.slice(1, -1);
+      }
+      try {
+        return decodeURIComponent(rawVal);
+      } catch {
+        return rawVal;
+      }
+    }
+  }
+  return null;
 }
 
 export async function authFetch(path, options = {}) {
-  const url = apiUrl(path);
-  const headers = { ...(options.headers || {}) };
+  const url = /^https?:\/\//i.test(path) ? path : apiUrl(path);
+  const headers =
+    options.headers instanceof Headers
+      ? Object.fromEntries(options.headers.entries())
+      : { ...(options.headers || {}) };
   const method = (options.method || "GET").toUpperCase();
 
   if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
     const csrf = getCsrfToken();
-    if (csrf && !headers["X-CSRF-Token"]) {
+    const hasCsrf = Object.keys(headers).some(
+      (k) => k.toLowerCase() === "x-csrf-token"
+    );
+    if (csrf && !hasCsrf) {
       headers["X-CSRF-Token"] = csrf;
     }
-    if (!headers["Content-Type"] && !(options.body instanceof FormData)) {
+
+    const hasContentType = Object.keys(headers).some(
+      (k) => k.toLowerCase() === "content-type"
+    );
+    if (!hasContentType && !(options.body instanceof FormData)) {
       headers["Content-Type"] = "application/json";
     }
   }
@@ -28,6 +52,6 @@ export async function authFetch(path, options = {}) {
   return fetch(url, {
     ...options,
     headers,
-    credentials: "include",
+    credentials: options.credentials || "include",
   });
 }

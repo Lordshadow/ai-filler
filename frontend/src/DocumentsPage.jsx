@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import './App.css'
 
-import { API_BASE_URL as API_URL } from './api'
+import { authFetch } from './api'
 
 export default function DocumentsPage() {
   const [documentText, setDocumentText] = useState('')
@@ -23,12 +23,17 @@ export default function DocumentsPage() {
     const formData = new FormData()
     files.forEach((file) => formData.append('files', file))
     try {
-      const response = await fetch(`${API_URL}/extract-document`, {
+      const response = await authFetch('/extract-document', {
         method: 'POST',
         body: formData,
-        credentials: 'include',
       })
       const result = await response.json()
+      if (response.status === 401 || response.status === 403) {
+        if (result.detail && typeof result.detail === 'string' && result.detail.toLowerCase().includes('csrf')) {
+          throw new Error('Your session security token is missing or expired. Please refresh the page or sign in again.')
+        }
+        throw new Error(result.detail || 'Session expired or unauthorized. Please sign in again.')
+      }
       if (!response.ok) throw new Error(result.detail || 'Document extraction failed.')
       setDocumentText(result.extracted_text)
       setOrganizedText(result.organized_text)

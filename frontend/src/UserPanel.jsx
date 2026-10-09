@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiUrl } from "./api";
+import { authFetch } from "./api";
 import "./Auth.css";
 
 export default function UserPanel() {
@@ -12,10 +12,7 @@ export default function UserPanel() {
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const response = await fetch(apiUrl("/auth/me"), {
-          method: "GET",
-          credentials: "include",
-        });
+        const response = await authFetch("/auth/me");
 
         if (!response.ok) {
           navigate("/login");
@@ -36,15 +33,8 @@ export default function UserPanel() {
 
   const handleLogout = async () => {
     try {
-      const csrfToken = document.cookie
-        .split(";")
-        .map((cookie) => cookie.trim())
-        .find((cookie) => cookie.startsWith("csrf_token="))
-        ?.slice("csrf_token=".length);
-      const response = await fetch(apiUrl("/auth/logout"), {
+      const response = await authFetch("/auth/logout", {
         method: "POST",
-        credentials: "include",
-        headers: csrfToken ? { "X-CSRF-Token": decodeURIComponent(csrfToken) } : {},
       });
 
       if (response.ok) {
