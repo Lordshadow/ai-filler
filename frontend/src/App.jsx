@@ -94,9 +94,17 @@ function App() {
           }
         />
         <Route
+          path="/forms"
+          element={
+            <ProtectedRoute allowedRoles={['user', 'organization_admin', 'super_admin']} loginPath="/login">
+              <UserPanel />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/user-panel"
           element={
-            <ProtectedRoute allowedRoles={['user']} loginPath="/login">
+            <ProtectedRoute allowedRoles={['user', 'organization_admin', 'super_admin']} loginPath="/login">
               <UserPanel />
             </ProtectedRoute>
           }

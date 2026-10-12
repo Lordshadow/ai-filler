@@ -12,7 +12,7 @@ const ROLE_CONFIGS = {
     type: "email",
     placeholder: "name@company.com",
     endpoint: "/auth/user/login",
-    destination: "/voice",
+    destination: "/user-panel",
     hasSignup: true,
   },
   admin: {
@@ -86,7 +86,7 @@ export default function Login({ role: initialRole = "user" }) {
               navigate("/admin-panel", { replace: true });
               return;
             } else if (kind === "user") {
-              navigate("/voice", { replace: true });
+              navigate("/user-panel", { replace: true });
               return;
             }
           }

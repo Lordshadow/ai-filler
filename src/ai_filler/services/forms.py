@@ -230,14 +230,14 @@ def list_forms(identity: dict[str, Any] | None = None) -> list[dict[str, Any]]:
                 (org_id,),
             ).fetchall()
         else:
-            # End user: view forms belonging to their org or global templates
+            # End user: view forms belonging to their org, or all forms if user has no org assigned
             if org_id:
                 forms = db.execute(
                     "SELECT * FROM forms WHERE organization_id = ? OR organization_id IS NULL ORDER BY created_at DESC",
                     (org_id,),
                 ).fetchall()
             else:
-                forms = db.execute("SELECT * FROM forms WHERE organization_id IS NULL ORDER BY created_at DESC").fetchall()
+                forms = db.execute("SELECT * FROM forms ORDER BY created_at DESC").fetchall()
 
         results = []
         for form in forms:

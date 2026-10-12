@@ -134,3 +134,27 @@
 - [x] **Git Cleanliness**: `git diff --check` PASSED with 0 whitespace or merge conflicts.
 - [x] **Logic & Contract Integrity**: Admin endpoints (`/admin`, `/admin/login`, `/admin-panel`) render properly and do not bounce users to `/voice`.
 - [x] **Access Control**: Role restrictions strictly enforced across applicant, organization admin, and super admin portals.
+---
+
+## [Log Entry #6] 2026-10-12 11:15:00 UTC - Available Forms Portal for Logged-In Users & Published Form Synchronization
+
+### Metadata
+- **Summary**: Implemented the complete user forms discovery and completion experience. When applicants log in, they are immediately routed to the user portal (`/user-panel` and `/forms`) displaying all available published forms. If no forms are published, the UI explicitly displays a "No form available in the UI" empty state. When an administrator creates and publishes a form, it immediately appears on the user page with interactive completion and submission to the backend.
+- **Delta**: 8 files changed (+700/-50) across frontend UserPanel, Login routing, App router, VoicePage/DocumentsPage navigation, Auth CSS, forms backend service, and automated platform workflow tests.
+- **Deterministic Gate**: PASS (Tests: 21/21 passed [8 platform workflows + 4 CSRF/CORS integration + 9 Auth API], Frontend Vite Build: 0 errors).
+
+### Audit Findings Matrix
+
+| Ref (File:Line) | Severity | Category | Issue & Evidence | Recommended Action / Status |
+| :--- | :--- | :--- | :--- | :--- |
+| `frontend/src/UserPanel.jsx:65` | HIGH | Feature Gap / UI Surface | End users had no interface to view, browse, or fill out published forms. `UserPanel` only displayed static profile information. | **Fixed**: Built comprehensive Available Forms UI featuring dynamic form listing (`GET /forms`), empty-state fallback ("No form available in the UI"), live form cards, manual refresh action, and client-validated interactive form filler submitting to `POST /applications`. |
+| `frontend/src/Login.jsx:15` | HIGH | UX Flow / Routing | When an applicant logged in, `Login.jsx` unconditionally routed them to `/voice`, preventing users from seeing available forms on sign-in. | **Fixed**: Updated `destination` and active session auto-routing to `/user-panel` (and `/forms`), ensuring users see available forms immediately upon login. |
+| `src/ai_filler/services/forms.py:240` | HIGH | Data Filtering / RBAC | Applicants without an assigned organization (`organization_id == None` from public signup) only queried `organization_id IS NULL`, hiding forms published by organization admins. | **Fixed**: Updated `list_forms` so unassigned users view all published forms while strictly maintaining `status = 'published'` filtering (drafts remain hidden from users). |
+| `frontend/src/App.jsx:96` | MEDIUM | Routing & Navigation | Missing direct `/forms` route and absence of Forms links in `VoicePage` and `DocumentsPage` navigation bars. | **Fixed**: Added `/forms` route alias to `UserPanel` and added "Available Forms" navigation buttons across `VoicePage`, `DocumentsPage`, and `UserPanel`. |
+| `tests/test_platform_workflows.py:503` | MEDIUM | Regression Guard | Lack of integration test checking draft hiding, empty states, instant published form visibility, and end-user application submission. | **Fixed**: Implemented `test_available_forms_published_visibility_and_empty_state` covering draft filtering, published form surfacing, and valid application submission. |
+
+### Verification Sign-Off
+- [x] **Deterministic CLI Gate**: `pytest tests/test_platform_workflows.py tests/test_document_csrf.py tests/test_auth_api.py` PASSED (21/21).
+- [x] **Frontend Production Build**: `npm --prefix frontend run build` compiled in 570ms with 0 errors.
+- [x] **Git Cleanliness**: `git diff --check` PASSED with 0 whitespace or merge conflicts.
+- [x] **Logic & Contract Integrity**: "No form available in the UI" displays when no forms exist; admin-published forms immediately appear on the user page; applications submit with HTTP 201.

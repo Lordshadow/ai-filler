@@ -103,6 +103,7 @@ export default function VoicePage() {
   return (
     <main className="app-shell">
       <nav className="page-nav">
+        <button onClick={() => navigate('/user-panel')}>Available Forms</button>
         <button className="selected" disabled>Voice</button>
         <button onClick={() => navigate('/documents')}>Documents</button>
         <button onClick={() => navigate('/user-panel')} style={{ marginLeft: 'auto' }}>Profile</button>

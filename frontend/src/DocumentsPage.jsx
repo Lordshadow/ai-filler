@@ -48,6 +48,7 @@ export default function DocumentsPage() {
   return (
     <main className="app-shell">
       <nav className="page-nav">
+        <button onClick={() => navigate('/user-panel')}>Available Forms</button>
         <button onClick={() => navigate('/voice')}>Voice</button>
         <button className="selected" disabled>Documents</button>
         <button onClick={() => navigate('/user-panel')} style={{ marginLeft: 'auto' }}>Profile</button>

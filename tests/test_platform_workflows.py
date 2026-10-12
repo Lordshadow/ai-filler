@@ -499,3 +499,104 @@ def test_email_field_type_validation_and_registration(test_setup):
     )
     assert bad_reg.status_code == 400
     assert "@" in bad_reg.json()["detail"]
+
+
+def test_available_forms_published_visibility_and_empty_state(test_setup):
+    admin_headers = test_setup["admin_headers"]
+    user_headers = test_setup["user_headers"]
+
+    # 1. Independent user without an organization registers and logs in
+    indep_client = TestClient(app)
+    indep_email = f"indep_{uuid.uuid4().hex[:6]}@example.com"
+    reg_resp = indep_client.post(
+        "/auth/signup",
+        json={
+            "full_name": "Independent User",
+            "email": indep_email,
+            "password": "Password123!",
+            "date_of_birth": "1994-03-15",
+            "phone_number": "+14155558899",
+        },
+    )
+    assert reg_resp.status_code == 200
+    login_resp = indep_client.post(
+        "/auth/user/login",
+        json={"identifier": indep_email, "password": "Password123!"},
+    )
+    assert login_resp.status_code == 200
+
+    # 2. Before any forms are published, or for a draft form
+    draft_form_id = f"frm_draft_{uuid.uuid4().hex[:8]}"
+    create_draft_resp = client.post(
+        "/forms",
+        json={
+            "form_id": draft_form_id,
+            "title": "Unpublished Draft Form",
+            "description": "Internal work in progress",
+            "fields": [{"fieldKey": "notes", "type": "text", "label": "Notes", "required": False}],
+            "publish": False,
+        },
+        headers=admin_headers,
+    )
+    assert create_draft_resp.status_code == 201
+
+    # End users must NOT see the unpublished draft form
+    indep_forms_resp = indep_client.get("/forms")
+    assert indep_forms_resp.status_code == 200
+    indep_form_ids = [f["formId"] for f in indep_forms_resp.json()["forms"]]
+    assert draft_form_id not in indep_form_ids
+
+    # 3. Admin publishes a new form
+    published_form_id = f"frm_pub_{uuid.uuid4().hex[:8]}"
+    create_pub_resp = client.post(
+        "/forms",
+        json={
+            "form_id": published_form_id,
+            "title": "Job Application 2026",
+            "description": "Please complete all personal and contact details",
+            "fields": [
+                {"fieldKey": "applicant_name", "type": "text", "label": "Full Name", "required": True},
+                {"fieldKey": "applicant_email", "type": "email", "label": "Email Address", "required": True},
+            ],
+            "publish": True,
+        },
+        headers=admin_headers,
+    )
+    assert create_pub_resp.status_code == 201
+
+    # 4. User immediately sees the newly published form
+    user_forms_resp = client.get("/forms", headers=user_headers)
+    assert user_forms_resp.status_code == 200
+    user_forms = user_forms_resp.json()["forms"]
+    pub_form = next((f for f in user_forms if f["formId"] == published_form_id), None)
+    assert pub_form is not None
+    assert pub_form["title"] == "Job Application 2026"
+    assert pub_form["status"] == "published"
+    assert len(pub_form["fields"]) == 2
+
+    # Independent user also sees the published form
+    indep_forms_resp2 = indep_client.get("/forms")
+    assert indep_forms_resp2.status_code == 200
+    indep_pub_form = next((f for f in indep_forms_resp2.json()["forms"] if f["formId"] == published_form_id), None)
+    assert indep_pub_form is not None
+    assert indep_pub_form["title"] == "Job Application 2026"
+
+    # 5. User submits application for the published form
+    csrf_token = indep_client.cookies.get("csrf_token", "")
+    sub_resp = indep_client.post(
+        "/applications",
+        json={
+            "form_id": published_form_id,
+            "form_version": 1,
+            "data": {
+                "applicant_name": "Independent User",
+                "applicant_email": indep_email,
+            },
+        },
+        headers={
+            "Idempotency-Key": f"idem_{uuid.uuid4().hex}",
+            "X-CSRF-Token": csrf_token,
+        },
+    )
+    assert sub_resp.status_code == 201
+    assert sub_resp.json()["application"]["status"] == "SUBMITTED"
