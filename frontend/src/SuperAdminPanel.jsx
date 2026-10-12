@@ -75,9 +75,13 @@ export default function SuperAdminPanel() {
       if (res.ok) {
         const data = await res.json();
         setOrganizations(data.organizations || []);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setError(data.detail || "Failed to load organizations.");
       }
     } catch (err) {
       console.error("Failed to load organizations:", err);
+      setError("Network error while loading organizations.");
     } finally {
       setLoadingOrgs(false);
     }
@@ -91,22 +95,22 @@ export default function SuperAdminPanel() {
       if (res.ok) {
         const data = await res.json();
         setAdmins(data.admins || []);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setError(data.detail || "Failed to load organization admins.");
       }
     } catch (err) {
       console.error("Failed to load organization admins:", err);
+      setError("Network error while loading organization admins.");
     } finally {
       setLoadingAdmins(false);
     }
   }, []);
 
-  // Load data on tab change
+  // Load organizations and admins eagerly on mount and tab switches
   useEffect(() => {
-    if (activeTab === "organizations") {
-      fetchOrganizations();
-    } else if (activeTab === "admins") {
-      fetchAdmins();
-      fetchOrganizations(); // Needed for dropdown
-    }
+    fetchOrganizations();
+    fetchAdmins();
   }, [activeTab, fetchOrganizations, fetchAdmins]);
 
   // Handle Create Organization
@@ -503,7 +507,18 @@ export default function SuperAdminPanel() {
                           )}
                         </td>
                         <td>
-                          <span className="sub-pill pill-count">{org.adminCount || 0} Admins</span>
+                          <button
+                            type="button"
+                            className="sub-pill pill-count"
+                            style={{ cursor: "pointer", border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1d4ed8" }}
+                            title={`View administrators for ${org.name}`}
+                            onClick={() => {
+                              setAdminSearch(org.name);
+                              setActiveTab("admins");
+                            }}
+                          >
+                            👥 {org.adminCount || 0} Admins ↗
+                          </button>
                         </td>
                         <td>
                           <span className="sub-pill pill-count">{org.formCount || 0} Forms</span>
@@ -747,7 +762,20 @@ export default function SuperAdminPanel() {
             <div className="sub-empty-state">
               <span className="empty-icon">👥</span>
               <h3>No administrators found</h3>
-              <p>Click "Provision New Administrator" above to create an administrator.</p>
+              <p>
+                {adminSearch
+                  ? `No administrators matching "${adminSearch}". Clear the search query to show all administrators.`
+                  : 'Click "+ Provision New Administrator" above to create an administrator.'}
+              </p>
+              {adminSearch && (
+                <button
+                  className="btn-secondary"
+                  style={{ marginTop: "10px" }}
+                  onClick={() => setAdminSearch("")}
+                >
+                  Clear Search Filter
+                </button>
+              )}
             </div>
           ) : (
             <div className="sub-table-wrapper">

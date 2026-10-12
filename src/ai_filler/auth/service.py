@@ -280,11 +280,16 @@ def login(*, identifier: str, password: str, kind: str) -> dict[str, object]:
         attempt = db.execute("SELECT * FROM login_attempts WHERE key = ?", (key,)).fetchone()
         if attempt and attempt["locked_until"] and attempt["locked_until"] > now():
             raise PermissionError("Invalid login credentials.")
-        column = "admin_id" if kind in {"organization_admin", "super_admin"} else "email"
-        identity = db.execute(
-            f"SELECT * FROM identities WHERE {column} = ? AND kind = ? AND is_active = 1",
-            (identifier if column == "admin_id" else identifier.lower(), kind),
-        ).fetchone()
+        if kind in {"organization_admin", "super_admin"}:
+            identity = db.execute(
+                "SELECT * FROM identities WHERE (admin_id = ? OR lower(email) = ?) AND kind = ? AND is_active = 1",
+                (identifier, identifier.lower(), kind),
+            ).fetchone()
+        else:
+            identity = db.execute(
+                "SELECT * FROM identities WHERE lower(email) = ? AND kind = ? AND is_active = 1",
+                (identifier.lower(), kind),
+            ).fetchone()
         if not identity or not verify_password(password, identity["password_hash"]):
             failures = (attempt["failures"] if attempt else 0) + 1
             locked = (

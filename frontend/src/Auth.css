@@ -1145,3 +1145,237 @@
   cursor: pointer;
   text-decoration: underline;
 }
+
+/* ==========================================================================
+   SUPER ADMIN EXECUTIVE GOVERNANCE THEME
+   ========================================================================== */
+
+.auth-container.super-admin-theme {
+  background: radial-gradient(circle at 50% 20%, #1e1b4b 0%, #0f172a 50%, #030712 100%);
+  min-height: 100vh;
+  position: relative;
+  overflow: hidden;
+}
+
+.auth-container.super-admin-theme::before {
+  content: "";
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle at 50% 50%, rgba(99, 102, 241, 0.08) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+.auth-card.super-admin-card {
+  background: rgba(15, 23, 42, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.85),
+              0 0 35px -5px rgba(99, 102, 241, 0.25);
+  color: #f8fafc;
+  border-radius: 14px;
+  position: relative;
+  z-index: 1;
+}
+
+.super-admin-header {
+  text-align: center;
+  margin-bottom: 24px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.super-admin-badge-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(129, 140, 248, 0.3);
+  padding: 6px 14px;
+  border-radius: 9999px;
+  margin-bottom: 14px;
+}
+
+.super-admin-shield {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.super-admin-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #c7d2fe;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.beacon-pulse {
+  width: 7px;
+  height: 7px;
+  background-color: #22c55e;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+  animation: beacon-pulse-anim 2s infinite;
+}
+
+@keyframes beacon-pulse-anim {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 6px rgba(34, 197, 94, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+  }
+}
+
+.super-admin-title {
+  margin: 0 0 8px 0;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.super-admin-desc {
+  margin: 0;
+  font-size: 13px;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+/* Form controls in Super Admin card */
+.super-admin-card .form-group label {
+  color: #e2e8f0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.super-admin-card .form-group input {
+  background: rgba(30, 41, 59, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #f8fafc;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.super-admin-card .form-group input:focus {
+  border-color: #818cf8;
+  box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.25);
+  background: rgba(30, 41, 59, 1);
+}
+
+.super-admin-card .form-group input::placeholder {
+  color: #64748b;
+}
+
+/* Password Toggle Wrapper */
+.password-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.password-input-wrapper input {
+  width: 100%;
+  padding-right: 44px !important;
+  box-sizing: border-box;
+}
+
+.password-toggle-btn {
+  position: absolute;
+  right: 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  font-size: 16px;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: color 0.2s, background-color 0.2s;
+}
+
+.password-toggle-btn:hover {
+  color: #e2e8f0;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Submit Button in Super Admin card */
+.btn-super-primary {
+  width: 100%;
+  padding: 13px;
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  box-shadow: 0 4px 15px rgba(79, 70, 229, 0.4);
+}
+
+.btn-super-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(124, 58, 237, 0.5);
+  filter: brightness(1.08);
+}
+
+.btn-super-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Security Compliance Notice */
+.super-admin-security-notice {
+  margin-top: 18px;
+  padding: 12px 14px;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px dashed rgba(148, 163, 184, 0.25);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #94a3b8;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.super-admin-security-notice .notice-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.super-admin-backlink {
+  text-align: center;
+  margin-top: 16px;
+}
+
+.super-admin-backlink a {
+  color: #94a3b8;
+  text-decoration: none;
+  font-size: 13px;
+  transition: color 0.2s;
+}
+
+.super-admin-backlink a:hover {
+  color: #c7d2fe;
+  text-decoration: underline;
+}

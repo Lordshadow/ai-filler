@@ -19,20 +19,20 @@ const ROLE_CONFIGS = {
     id: "admin",
     title: "Organization Admin Portal",
     tabLabel: "🏢 Org Admin",
-    label: "Admin Login ID",
+    label: "Admin Login ID or Email",
     type: "text",
-    placeholder: "ADM-XXXXXX",
+    placeholder: "e.g. ADM-B44FDBAF9FAF or admin@company.com",
     endpoint: "/auth/admin/login",
     destination: "/admin-panel",
     hasSignup: false,
   },
   super_admin: {
     id: "super_admin",
-    title: "Super Admin Console",
-    tabLabel: "🛡️ Super User",
-    label: "Super Admin ID",
+    title: "Global Governance Console",
+    tabLabel: "🛡️ Root Governance",
+    label: "Root Admin ID or Email",
     type: "text",
-    placeholder: "superadmin",
+    placeholder: "e.g. Shadow or shadow@super-admin.local",
     endpoint: "/auth/super/login",
     destination: "/super-admin-panel",
     hasSignup: false,
@@ -42,6 +42,7 @@ const ROLE_CONFIGS = {
 export default function Login({ role: initialRole = "user" }) {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
@@ -141,21 +142,37 @@ export default function Login({ role: initialRole = "user" }) {
     );
   }
 
-  return (
-    <div className="auth-container">
-      <div className="auth-card">
-        {/* Brand Header */}
-        <div style={{ textAlign: "center", marginBottom: "20px" }}>
-          <div style={{ fontSize: "36px", marginBottom: "6px" }}>⚡</div>
-          <h1 style={{ margin: "0 0 6px 0", fontSize: "24px", color: "#1e293b" }}>AI Filler</h1>
-          <p style={{ margin: 0, color: "#64748b", fontSize: "14px" }}>
-            Intelligent Multi-Modal Form & Workflow Engine
-          </p>
-        </div>
+  const isSuper = selectedRole === "super_admin";
 
-        <h2 style={{ fontSize: "18px", color: "#334155", marginBottom: "16px", textAlign: "center" }}>
-          {activeConfig.title}
-        </h2>
+  return (
+    <div className={`auth-container ${isSuper ? "super-admin-theme" : ""}`}>
+      <div className={`auth-card ${isSuper ? "super-admin-card" : ""}`}>
+        {isSuper ? (
+          <div className="super-admin-header">
+            <div className="super-admin-badge-row">
+              <span className="super-admin-shield">🛡️</span>
+              <span className="super-admin-kicker">
+                <span className="beacon-pulse" />
+                ROOT GOVERNANCE GATEWAY
+              </span>
+            </div>
+            <h1 className="super-admin-title">Global Governance Console</h1>
+            <p className="super-admin-desc">
+              Privileged Tenant Orchestration &amp; Root Administration
+            </p>
+          </div>
+        ) : (
+          <div style={{ textAlign: "center", marginBottom: "20px" }}>
+            <div style={{ fontSize: "36px", marginBottom: "6px" }}>⚡</div>
+            <h1 style={{ margin: "0 0 6px 0", fontSize: "24px", color: "#1e293b" }}>AI Filler</h1>
+            <p style={{ margin: 0, color: "#64748b", fontSize: "14px" }}>
+              Intelligent Multi-Modal Form &amp; Workflow Engine
+            </p>
+            <h2 style={{ fontSize: "18px", color: "#334155", marginTop: "16px", marginBottom: 0, textAlign: "center" }}>
+              {activeConfig.title}
+            </h2>
+          </div>
+        )}
 
         {error && <div className="error-message" role="alert">{error}</div>}
 
@@ -171,46 +188,93 @@ export default function Login({ role: initialRole = "user" }) {
               onChange={(event) => setIdentifier(event.target.value)}
               required
               disabled={loading}
+              autoFocus
             />
           </div>
 
           <div className="form-group">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <label htmlFor="password">Password</label>
+              <label htmlFor="password">
+                {isSuper ? "Root Secret Key / Password" : "Password"}
+              </label>
               <a
                 href={`/forgot-password/${activeConfig.id}`}
-                style={{ fontSize: "12px", color: "#6366f1", textDecoration: "none" }}
+                style={{
+                  fontSize: "12px",
+                  color: isSuper ? "#a5b4fc" : "#6366f1",
+                  textDecoration: "none",
+                }}
               >
                 Forgot password?
               </a>
             </div>
-            <input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              placeholder="••••••••••••"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-              disabled={loading}
-            />
+            <div className="password-input-wrapper">
+              <input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                autoComplete="current-password"
+                placeholder="••••••••••••"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                disabled={loading}
+              />
+              <button
+                type="button"
+                className="password-toggle-btn"
+                onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                title={showPassword ? "Hide password" : "Show password"}
+                tabIndex={-1}
+              >
+                {showPassword ? "🙈" : "👁️"}
+              </button>
+            </div>
           </div>
 
-          <button type="submit" className="btn-primary" disabled={loading} style={{ marginTop: "8px" }}>
-            {loading ? "Signing in…" : `Sign into ${activeConfig.title}`}
+          <button
+            type="submit"
+            className={isSuper ? "btn-super-primary" : "btn-primary"}
+            disabled={loading}
+            style={{ marginTop: "8px" }}
+          >
+            {loading
+              ? isSuper
+                ? "Authenticating Root Credentials…"
+                : "Signing in…"
+              : isSuper
+                ? "Sign In to Governance Console →"
+                : `Sign into ${activeConfig.title}`}
           </button>
         </form>
 
-        {activeConfig.hasSignup && (
-          <p className="auth-link">
-            Don't have an applicant account? <a href="/signup">Sign up here</a>
-          </p>
+        {isSuper && (
+          <div className="super-admin-security-notice">
+            <span className="notice-icon">🔒</span>
+            <span>
+              <strong>Root Privileged Zone:</strong> Access is restricted to authorized global system administrators. All authentication events, session tokens, and tenant governance actions are cryptographically audited.
+            </span>
+          </div>
         )}
 
-        {selectedRole === "admin" && (
-          <p className="auth-link" style={{ fontSize: "12px", color: "#94a3b8" }}>
-            Organization Admin IDs (e.g. <code>ADM-XXXXXX</code>) are generated by your Super Admin.
+        {isSuper ? (
+          <p className="super-admin-backlink">
+            <a href="/login">← Return to Applicant &amp; Org Admin Portal</a>
           </p>
+        ) : (
+          <>
+            {activeConfig.hasSignup && (
+              <p className="auth-link">
+                Don't have an applicant account? <a href="/signup">Sign up here</a>
+              </p>
+            )}
+
+            {selectedRole === "admin" && (
+              <p className="auth-link" style={{ fontSize: "12px", color: "#94a3b8" }}>
+                Organization Admin IDs (e.g. <code>ADM-XXXXXX</code>) are generated by your Super Admin.
+              </p>
+            )}
+          </>
         )}
       </div>
     </div>

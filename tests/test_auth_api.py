@@ -197,3 +197,68 @@ class TestRoleSessionTransition:
         me_admin = session_client.get("/auth/me")
         assert me_admin.status_code == 200
         assert me_admin.json()["user"]["kind"] == "organization_admin"
+
+
+class TestAdministrativeAuth:
+    """Test administrative login by both admin_id and email, and directory listing."""
+
+    def test_super_admin_login_by_id_and_email(self):
+        from ai_filler.auth.service import create_super_admin
+
+        create_super_admin(identifier="Shadow", password="SuperPassword123!")
+
+        super_client = TestClient(app)
+        # Login by admin_id
+        resp1 = super_client.post(
+            "/auth/super/login",
+            json={"identifier": "Shadow", "password": "SuperPassword123!"},
+        )
+        assert resp1.status_code == 200
+        assert resp1.json()["user"]["kind"] == "super_admin"
+
+        # Login by email
+        resp2 = super_client.post(
+            "/auth/super/login",
+            json={"identifier": "shadow@super-admin.local", "password": "SuperPassword123!"},
+        )
+        assert resp2.status_code == 200
+        assert resp2.json()["user"]["kind"] == "super_admin"
+
+        # List organizations and organization admins as super admin
+        csrf = resp2.cookies.get("csrf_token")
+        orgs_resp = super_client.get("/organizations", headers={"X-CSRF-Token": csrf})
+        assert orgs_resp.status_code == 200
+        assert "organizations" in orgs_resp.json()
+
+        admins_resp = super_client.get("/auth/super/organization-admins", headers={"X-CSRF-Token": csrf})
+        assert admins_resp.status_code == 200
+        assert "admins" in admins_resp.json()
+
+    def test_org_admin_login_by_email_and_admin_id(self):
+        from ai_filler.auth.service import create_organization_admin
+
+        create_organization_admin(
+            organization_name="Techjays Test",
+            full_name="Saravanan Test",
+            email="saravanan_test@techjays.com",
+            password="AdminPassword123!",
+            admin_id="ADM-TEST999",
+        )
+
+        admin_client = TestClient(app)
+        # Login using email instead of admin_id
+        resp_email = admin_client.post(
+            "/auth/admin/login",
+            json={"identifier": "saravanan_test@techjays.com", "password": "AdminPassword123!"},
+        )
+        assert resp_email.status_code == 200
+        assert resp_email.json()["user"]["kind"] == "organization_admin"
+        assert resp_email.json()["user"]["email"] == "saravanan_test@techjays.com"
+
+        # Login using admin_id
+        resp_id = admin_client.post(
+            "/auth/admin/login",
+            json={"identifier": "ADM-TEST999", "password": "AdminPassword123!"},
+        )
+        assert resp_id.status_code == 200
+        assert resp_id.json()["user"]["kind"] == "organization_admin"

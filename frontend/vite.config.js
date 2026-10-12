@@ -7,6 +7,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/auth': 'http://127.0.0.1:8000',
+      '/organizations': 'http://127.0.0.1:8000',
       '/forms': 'http://127.0.0.1:8000',
       '/submissions': 'http://127.0.0.1:8000',
       '/transcribe': 'http://127.0.0.1:8000',

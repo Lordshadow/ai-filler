@@ -238,3 +238,45 @@
 - [x] **Git Cleanliness**: `git diff --check` PASSED with 0 whitespace or merge conflicts.
 - [x] **Logic & Contract Integrity**: Super Admin console strictly restricted to organizations and admin governance; user forms/submissions removed; organization creation and admin updates update SQLite atomically.
 - [x] **Access Control**: Super admin governance routes strictly guarded by `current_super_admin` (403 for non-super users).
+
+---
+
+## [Log Entry #10] 2026-10-12 12:20:00 UTC - Super Admin Login UI Polish, Existing Admin Directory Visibility & DB Relational Audit
+
+### Metadata
+- **Summary**: Comprehensive resolution of Super Admin portal usability and directory visibility. Fixed Vite dev server proxy omission of `/organizations`, resolved eager loading in `SuperAdminPanel.jsx` so existing administrators (e.g. `Saravanan`, `ADM-B44FDBAF9FAF`, `Techjays`) appear immediately upon initial load and across tabs. Overhauled the `/super-admin/login` UI into an executive, high-security Root Governance Console with cybersecurity shield branding, pulsing live status indicator, show/hide password visibility toggle, autofocus, and security attestation notice. Extended authentication service so administrative users can log in seamlessly with either their Admin ID or their registered email address. Fully audited SQLite database schema and foreign key integrity.
+- **Delta**: 6 files modified across frontend Vite proxy, Auth CSS, Login component, SuperAdminPanel, backend auth service, and API integration test suite.
+- **Deterministic Gate**: PASS (Tests: 27/27 passed [12 platform workflows + 4 CSRF/CORS integration + 11 Auth API], Frontend Vite Build: 0 errors in 624ms, Git diff check: 0 errors).
+
+### Database Structure & Relational Audit Matrix
+
+| Table | Primary Key | Foreign Keys & Constraints | Indexes | Verified Status |
+| :--- | :--- | :--- | :--- | :--- |
+| `organizations` | `id` (INTEGER AUTOINCREMENT) | `name` UNIQUE | Primary key index | **Confirmed Healthy**: Tenant isolation root table (`Techjays`, id 1). |
+| `identities` | `id` (INTEGER AUTOINCREMENT) | `kind` CHECK IN ('super_admin', 'organization_admin', 'user'), `admin_id` UNIQUE, `organization_id` REFERENCES `organizations(id)` ON DELETE SET NULL, `is_active` IN (0, 1) | `uq_identities_email` (lower), `uq_identities_admin_id`, `idx_identities_email`, `idx_identities_admin_id` | **Confirmed Healthy**: Contains active Super Admin (`Shadow`) and Org Admin (`Saravanan`, `ADM-B44FDBAF9FAF`, org 1). |
+| `sessions` | `id` (INTEGER AUTOINCREMENT) | `identity_id` REFERENCES `identities(id)` ON DELETE CASCADE, `token_hash` UNIQUE | `idx_sessions_token_hash`, `idx_sessions_identity` | **Confirmed Healthy**: Ephemeral session storage with CSRF tokens. |
+| `login_attempts` | `key` (TEXT PRIMARY KEY) | Failures counter, `locked_until` timestamp | Primary key index | **Confirmed Healthy**: Rate limiting and brute-force mitigation. |
+| `password_reset_tokens` | `id` (INTEGER AUTOINCREMENT) | `identity_id` REFERENCES `identities(id)` ON DELETE CASCADE, `token_hash` UNIQUE | `idx_password_reset_identity` | **Confirmed Healthy**: Secure cryptographic token storage. |
+| `forms` | `id` (TEXT PRIMARY KEY) | `organization_id` REFERENCES `organizations(id)` ON DELETE CASCADE, `created_by` REFERENCES `identities(id)` ON DELETE SET NULL | Primary key index | **Confirmed Healthy**: Multi-tenant form definitions. |
+| `form_versions` | `id` (INTEGER AUTOINCREMENT) | `form_id` REFERENCES `forms(id)` ON DELETE CASCADE, `customized_by` REFERENCES `identities(id)` ON DELETE SET NULL, UNIQUE(`form_id`, `version`) | Composite unique index | **Confirmed Healthy**: Immutable version history for forms. |
+| `drafts` | `id` (TEXT PRIMARY KEY) | `form_id` REFERENCES `forms(id)`, `user_id` REFERENCES `identities(id)`, `organization_id` REFERENCES `organizations(id)` | Foreign keys confirmed | **Confirmed Healthy**: Work-in-progress user submissions. |
+| `applications` | `id` (TEXT PRIMARY KEY) | `form_id` REFERENCES `forms(id)`, `user_id` REFERENCES `identities(id)`, `organization_id` REFERENCES `organizations(id)`, `status` CHECK IN ('SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'REJECTED') | Foreign keys confirmed | **Confirmed Healthy**: Submitted applicant records with provenance. |
+| `application_provenance_audit` | `id` (INTEGER AUTOINCREMENT) | `application_id` REFERENCES `applications(id)` ON DELETE CASCADE | `idx_app_audit_app_id` | **Confirmed Healthy**: Immutable audit ledger for field provenance. |
+| `idempotency_records` | `(key, user_id)` (COMPOSITE PK) | `user_id` REFERENCES `identities(id)` ON DELETE CASCADE | Primary key index | **Confirmed Healthy**: Replay protection for form submissions. |
+
+### Audit Findings Matrix
+
+| Ref (File:Line) | Severity | Category | Issue & Evidence | Recommended Action / Status |
+| :--- | :--- | :--- | :--- | :--- |
+| `frontend/vite.config.js:8` | HIGH | Dev Proxy / Routing Gap | `/organizations` was absent from Vite proxy rules. Requests from the React frontend to `/organizations` returned index.html, causing silent JSON parsing failures and preventing organization counts/names from populating. | **Fixed**: Added `'/organizations': 'http://127.0.0.1:8000'` to `vite.config.js` proxy map. |
+| `frontend/src/SuperAdminPanel.jsx:102` | HIGH | Component Lifecycle / Data Eagerness | `fetchAdmins()` was only invoked if `activeTab === "admins"`. On initial page load (defaulting to `"organizations"`), administrators were never fetched, causing existing admins to appear missing and leaving KPI cards with 0 active admins. | **Fixed**: Updated `useEffect` to eagerly call both `fetchOrganizations()` and `fetchAdmins()` on initial mount and tab transitions. Added clickable admin count pills linking directly to filtered admin views. |
+| `frontend/src/Login.jsx:144` & `frontend/src/Auth.css:1149` | MEDIUM | Executive UI & Usability | Super Admin login previously used generic form styling with no distinction from applicant login, lacked password visibility toggles, had no cybersecurity branding, and lacked root security attestation. | **Fixed**: Redesigned `/super-admin/login` into a high-security Root Governance Console with dark glassmorphism theme, shield icon, pulsing status beacon, password toggle button (👁️ / 🙈), autofocus, and security advisory banner. |
+| `src/ai_filler/auth/service.py:283` | MEDIUM | Authentication UX & Resilience | `login()` previously queried `admin_id = ?` exclusively for `super_admin` and `organization_admin`, causing login failures if admins typed their registered email address instead of their ID. | **Fixed**: Updated query to match `WHERE (admin_id = ? OR lower(email) = ?)`, allowing administrative users to log in with either their Admin ID or their email address. |
+| `tests/test_auth_api.py:202` | MEDIUM | Regression Guard | Lack of test coverage for Super Admin and Org Admin login via dual identifiers (ID vs. email) and directory access. | **Fixed**: Added `TestAdministrativeAuth` covering login by ID and email for both super admin and org admin, along with authenticated directory access. |
+
+### Verification Sign-Off
+- [x] **Deterministic CLI Gate**: `pytest tests/test_platform_workflows.py tests/test_document_csrf.py tests/test_auth_api.py` PASSED (27/27).
+- [x] **Frontend Production Build**: `npm --prefix frontend run build` compiled cleanly in 624ms with 0 errors.
+- [x] **Git Cleanliness**: `git diff --check` PASSED with 0 whitespace or merge conflicts.
+- [x] **Database Schema**: All 11 tables in SQLite inspected; foreign keys, unique constraints, and indices confirmed 100% sound.
+- [x] **Directory Visibility**: Existing organization admin (`Saravanan`, `ADM-B44FDBAF9FAF`, `Techjays`) is fetched eagerly and immediately visible in the Super Admin console.
