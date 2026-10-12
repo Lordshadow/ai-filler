@@ -706,3 +706,154 @@ def test_admin_submissions_list_and_status_update(test_setup):
         headers=admin_headers,
     )
     assert not_found_resp.status_code == 404
+
+
+def test_user_profile_edit_and_password_change(test_setup):
+    user_headers = test_setup["user_headers"]
+    user_id = test_setup["user"]["id"]
+
+    # 1. Fetch current profile via /users/me
+    me_resp = client.get("/users/me", headers=user_headers)
+    assert me_resp.status_code == 200
+    user_data = me_resp.json()["user"]
+    assert user_data["id"] == user_id
+    assert user_data["email"] == "jane@example.com"
+    assert user_data["organization_name"] == "Apex Healthcare"
+
+    # 2. Update profile via PATCH /users/me
+    new_email = f"jane_updated_{uuid.uuid4().hex[:6]}@example.com"
+    patch_resp = client.patch(
+        "/users/me",
+        json={
+            "full_name": "Jane D. Updated",
+            "email": new_email,
+            "phone_number": "+14155559999",
+            "date_of_birth": "1994-06-15",
+        },
+        headers=user_headers,
+    )
+    assert patch_resp.status_code == 200
+    updated_user = patch_resp.json()["user"]
+    assert updated_user["full_name"] == "Jane D. Updated"
+    assert updated_user["email"] == new_email
+    assert updated_user["phone_number"] == "+14155559999"
+    assert updated_user["date_of_birth"] == "1994-06-15"
+
+    # 3. Validation: Duplicate email rejected
+    dup_resp = client.patch(
+        "/users/me",
+        json={"email": test_setup["org_admin"]["email"]},
+        headers=user_headers,
+    )
+    assert dup_resp.status_code == 400
+    assert "already exists" in dup_resp.json()["detail"]
+
+    # 4. Validation: Invalid phone rejected
+    invalid_phone_resp = client.patch(
+        "/users/me",
+        json={"phone_number": "invalid-phone"},
+        headers=user_headers,
+    )
+    assert invalid_phone_resp.status_code == 400
+    assert "E.164" in invalid_phone_resp.json()["detail"]
+
+    # 5. Validation: Underage date of birth rejected
+    underage_resp = client.patch(
+        "/users/me",
+        json={"date_of_birth": "2015-01-01"},
+        headers=user_headers,
+    )
+    assert underage_resp.status_code == 400
+    assert "at least 18 years old" in underage_resp.json()["detail"]
+
+    # 6. Change Password: Wrong current password fails
+    wrong_pwd_resp = client.post(
+        "/auth/change-password",
+        json={
+            "current_password": "WrongPassword!",
+            "new_password": "NewUserPassword123!",
+        },
+        headers=user_headers,
+    )
+    assert wrong_pwd_resp.status_code == 400
+    assert "incorrect" in wrong_pwd_resp.json()["detail"]
+
+    # 7. Change Password: Short password (< 8 chars) fails
+    short_pwd_resp = client.post(
+        "/auth/change-password",
+        json={
+            "current_password": "UserPassword123!",
+            "new_password": "short",
+        },
+        headers=user_headers,
+    )
+    assert short_pwd_resp.status_code == 400
+    assert "at least 8 characters" in short_pwd_resp.json()["detail"]
+
+    # 8. Change Password: Success
+    change_resp = client.post(
+        "/auth/change-password",
+        json={
+            "current_password": "UserPassword123!",
+            "new_password": "BrandNewPassword123!",
+        },
+        headers=user_headers,
+    )
+    assert change_resp.status_code == 200
+    assert change_resp.json()["status"] == "ok"
+
+    # 9. Verify login with new email and new password
+    login_resp = client.post(
+        "/auth/user/login",
+        json={"identifier": new_email, "password": "BrandNewPassword123!"},
+    )
+    assert login_resp.status_code == 200
+
+
+def test_admin_profile_edit_and_organization_update(test_setup):
+    admin_headers = test_setup["admin_headers"]
+
+    # 1. Admin gets own profile via /users/me
+    admin_me_resp = client.get("/users/me", headers=admin_headers)
+    assert admin_me_resp.status_code == 200
+    admin_profile = admin_me_resp.json()["user"]
+    assert admin_profile["admin_id"] == "ADM-APEX01"
+    assert admin_profile["organization_name"] == "Apex Healthcare"
+
+    # 2. Admin edits profile & updates organization name
+    new_admin_email = f"apex_lead_{uuid.uuid4().hex[:6]}@apex.com"
+    new_org_name = f"Apex Medical Group {uuid.uuid4().hex[:4]}"
+    patch_admin_resp = client.patch(
+        "/users/me",
+        json={
+            "full_name": "Dr. Apex Senior",
+            "email": new_admin_email,
+            "phone_number": "+14155558888",
+            "organization_name": new_org_name,
+        },
+        headers=admin_headers,
+    )
+    assert patch_admin_resp.status_code == 200
+    updated_admin = patch_admin_resp.json()["user"]
+    assert updated_admin["full_name"] == "Dr. Apex Senior"
+    assert updated_admin["email"] == new_admin_email
+    assert updated_admin["phone_number"] == "+14155558888"
+    assert updated_admin["organization_name"] == new_org_name
+
+    # 3. Admin changes password
+    change_resp = client.post(
+        "/auth/change-password",
+        json={
+            "current_password": "AdminPassword123!",
+            "new_password": "NewAdminPassword123!",
+        },
+        headers=admin_headers,
+    )
+    assert change_resp.status_code == 200
+
+    # 4. Admin logs in with ADM-APEX01 and new password
+    admin_login_resp = client.post(
+        "/auth/admin/login",
+        json={"identifier": "ADM-APEX01", "password": "NewAdminPassword123!"},
+    )
+    assert admin_login_resp.status_code == 200

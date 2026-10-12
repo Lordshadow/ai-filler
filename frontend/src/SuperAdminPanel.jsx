@@ -4,13 +4,15 @@ import { authFetch } from "./api";
 import "./Auth.css";
 import FormBuilder from "./FormBuilder";
 import SubmissionsManager from "./SubmissionsManager";
+import ProfileEditor from "./ProfileEditor";
 
 export default function SuperAdminPanel() {
   const [form, setForm] = useState({ organization_name: "", full_name: "", email: "", password: "" });
   const [error, setError] = useState("");
   const [createdId, setCreatedId] = useState("");
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("submissions"); // "submissions" | "admins" | "forms"
+  const [superUser, setSuperUser] = useState(null);
+  const [activeTab, setActiveTab] = useState("submissions"); // "submissions" | "admins" | "forms" | "profile"
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -19,6 +21,7 @@ export default function SuperAdminPanel() {
         if (!response.ok) throw new Error("Please log in as the super user.");
         const data = await response.json();
         if (data.user.kind !== "super_admin") throw new Error("Super-admin access required.");
+        setSuperUser(data.user);
       })
       .catch((err) => {
         setError(err.message);
@@ -83,6 +86,12 @@ export default function SuperAdminPanel() {
         >
           📋 Global Form Templates
         </button>
+        <button
+          className={`tab ${activeTab === "profile" ? "active" : ""}`}
+          onClick={() => setActiveTab("profile")}
+        >
+          ⚙️ Super Admin Profile & Security
+        </button>
       </div>
 
       {activeTab === "submissions" && (
@@ -130,6 +139,16 @@ export default function SuperAdminPanel() {
       {activeTab === "forms" && (
         <section className="panel-section">
           <FormBuilder adminRole="super_admin" />
+        </section>
+      )}
+
+      {activeTab === "profile" && (
+        <section style={{ marginTop: "12px" }}>
+          <ProfileEditor
+            user={superUser}
+            onProfileUpdated={(updated) => setSuperUser(updated)}
+            role="super_admin"
+          />
         </section>
       )}
     </main>

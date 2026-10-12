@@ -4,6 +4,7 @@ import { authFetch } from "./api";
 import "./Auth.css";
 import FormBuilder from "./FormBuilder";
 import SubmissionsManager from "./SubmissionsManager";
+import ProfileEditor from "./ProfileEditor";
 
 export default function AdminPanel() {
   const [admin, setAdmin] = useState(null);
@@ -123,7 +124,7 @@ export default function AdminPanel() {
           className={`tab ${activeTab === "settings" ? "active" : ""}`}
           onClick={() => setActiveTab("settings")}
         >
-          🏢 Organization Profile
+          ⚙️ Admin & Organization Profile
         </button>
       </div>
 
@@ -251,17 +252,14 @@ export default function AdminPanel() {
         </div>
       )}
 
-      {/* Tab 3: Organization Details */}
+      {/* Tab: Admin & Organization Profile */}
       {activeTab === "settings" && (
-        <div className="panel-section">
-          <h3>Organization Overview</h3>
-          <div className="info-card" style={{ marginTop: "16px" }}>
-            <p><strong>Admin Full Name:</strong> {admin?.full_name}</p>
-            <p><strong>Admin ID:</strong> {admin?.admin_id}</p>
-            <p><strong>Organization Scope ID:</strong> {admin?.organization_id || "Global"}</p>
-            <p><strong>Role Level:</strong> {admin?.kind}</p>
-            <p><strong>Connected Email:</strong> {admin?.email}</p>
-          </div>
+        <div style={{ marginTop: "12px" }}>
+          <ProfileEditor
+            user={admin}
+            onProfileUpdated={(updated) => setAdmin(updated)}
+            role="organization_admin"
+          />
         </div>
       )}
     </div>

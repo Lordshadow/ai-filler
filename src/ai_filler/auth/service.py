@@ -34,7 +34,7 @@ def validate_email(email: str) -> None:
 
 
 def _public(identity: sqlite3.Row) -> dict[str, object]:
-    return {
+    result = {
         "id": identity["id"],
         "kind": identity["kind"],
         "email": identity["email"],
@@ -42,6 +42,18 @@ def _public(identity: sqlite3.Row) -> dict[str, object]:
         "admin_id": identity["admin_id"],
         "organization_id": identity["organization_id"],
     }
+    cols = identity.keys() if hasattr(identity, "keys") else []
+    if "organization_name" in cols and identity["organization_name"] is not None:
+        result["organization_name"] = identity["organization_name"]
+    if "phone_number" in cols and identity["phone_number"] is not None:
+        result["phone_number"] = identity["phone_number"]
+    if "date_of_birth" in cols and identity["date_of_birth"] is not None:
+        result["date_of_birth"] = identity["date_of_birth"]
+    if "created_at" in cols and identity["created_at"] is not None:
+        result["created_at"] = identity["created_at"]
+    if "recovery_email" in cols and identity["recovery_email"] is not None:
+        result["recovery_email"] = identity["recovery_email"]
+    return result
 
 
 def signup(
@@ -301,8 +313,9 @@ def authenticate(token: str | None, csrf_token: str | None = None, require_csrf:
         raise PermissionError("Authentication required.")
     with connect() as db:
         identity = db.execute(
-            """SELECT i.*, s.csrf_token FROM sessions s
+            """SELECT i.*, s.csrf_token, o.name AS organization_name FROM sessions s
             JOIN identities i ON i.id = s.identity_id
+            LEFT JOIN organizations o ON i.organization_id = o.id
             WHERE s.token_hash = ? AND s.revoked_at IS NULL
             AND s.expires_at > ? AND i.is_active = 1""",
             (token_hash(token), now()),
@@ -390,40 +403,137 @@ def register_user(
 
 def get_user_profile(user_id: int) -> dict[str, object] | None:
     with connect() as db:
-        row = db.execute("SELECT * FROM identities WHERE id = ? AND is_active = 1", (user_id,)).fetchone()
+        row = db.execute(
+            """SELECT i.*, o.name AS organization_name
+            FROM identities i
+            LEFT JOIN organizations o ON i.organization_id = o.id
+            WHERE i.id = ? AND i.is_active = 1""",
+            (user_id,),
+        ).fetchone()
         if not row:
             return None
         return {
             **_public(row),
             "date_of_birth": row["date_of_birth"],
             "phone_number": row["phone_number"],
+            "organization_name": row["organization_name"],
             "created_at": row["created_at"],
+            "recovery_email": row["recovery_email"] if "recovery_email" in row.keys() else None,
         }
 
 
 def update_user_profile(user_id: int, updates: dict[str, object]) -> dict[str, object]:
-    allowed_fields = {"full_name", "phone_number", "date_of_birth"}
-    filtered = {k: v for k, v in updates.items() if k in allowed_fields and v is not None}
-    
-    if not filtered:
-        profile = get_user_profile(user_id)
-        if not profile:
+    with connect() as db:
+        user_row = db.execute(
+            """SELECT i.*, o.name AS organization_name
+            FROM identities i
+            LEFT JOIN organizations o ON i.organization_id = o.id
+            WHERE i.id = ? AND i.is_active = 1""",
+            (user_id,),
+        ).fetchone()
+        if not user_row:
             raise ValueError("User not found.")
-        return profile
 
-    if "phone_number" in filtered:
-        validate_phone_e164(str(filtered["phone_number"]))
-    if "date_of_birth" in filtered:
-        validate_date_of_birth(str(filtered["date_of_birth"]))
+        identity_updates: dict[str, object] = {}
 
-    set_clauses = [f"{col} = ?" for col in filtered.keys()]
-    values = list(filtered.values())
-    values.append(user_id)
+        # 1. full_name
+        if "full_name" in updates and updates["full_name"] is not None:
+            clean_name = str(updates["full_name"]).strip()
+            if not clean_name:
+                raise ValueError("Full name cannot be empty.")
+            identity_updates["full_name"] = clean_name
+
+        # 2. email
+        if "email" in updates and updates["email"] is not None:
+            clean_email = str(updates["email"]).strip().lower()
+            validate_email(clean_email)
+            dup = db.execute(
+                "SELECT id FROM identities WHERE lower(email) = ? AND id != ?",
+                (clean_email, user_id),
+            ).fetchone()
+            if dup:
+                raise ValueError("An account with that email address already exists.")
+            identity_updates["email"] = clean_email
+
+        # 3. phone_number
+        if "phone_number" in updates and updates["phone_number"] is not None:
+            clean_phone = str(updates["phone_number"]).strip()
+            validate_phone_e164(clean_phone)
+            identity_updates["phone_number"] = clean_phone
+
+        # 4. date_of_birth
+        if "date_of_birth" in updates and updates["date_of_birth"] is not None:
+            clean_dob = str(updates["date_of_birth"]).strip()
+            validate_date_of_birth(clean_dob, min_age=18)
+            identity_updates["date_of_birth"] = clean_dob
+
+        # 5. recovery_email (for super admin)
+        if "recovery_email" in updates and updates["recovery_email"] is not None:
+            clean_rec = str(updates["recovery_email"]).strip().lower()
+            validate_email(clean_rec)
+            identity_updates["recovery_email"] = clean_rec
+
+        # 6. organization_name (for organization admin or assigned accounts)
+        if "organization_name" in updates and updates["organization_name"] is not None:
+            clean_org = str(updates["organization_name"]).strip()
+            if not clean_org:
+                raise ValueError("Organization name cannot be empty.")
+            org_id = user_row["organization_id"]
+            if not org_id:
+                raise ValueError("Account is not associated with an organization.")
+            dup_org = db.execute(
+                "SELECT id FROM organizations WHERE lower(name) = ? AND id != ?",
+                (clean_org.lower(), org_id),
+            ).fetchone()
+            if dup_org:
+                raise ValueError("An organization with that name already exists.")
+            db.execute("UPDATE organizations SET name = ? WHERE id = ?", (clean_org, org_id))
+
+        # Apply identity columns update if any
+        if identity_updates:
+            set_clauses = [f"{col} = ?" for col in identity_updates.keys()]
+            values = list(identity_updates.values())
+            values.append(user_id)
+            db.execute(
+                f"UPDATE identities SET {', '.join(set_clauses)} WHERE id = ? AND is_active = 1",
+                values,
+            )
+
+        db.commit()
+
+    return get_user_profile(user_id) or {}
+
+
+def change_password(
+    *,
+    identity_id: int,
+    current_password: str,
+    new_password: str,
+) -> bool:
+    if not current_password or not new_password:
+        raise ValueError("Both current password and new password are required.")
+
+    if len(new_password) < 8:
+        raise ValueError("New password must be at least 8 characters long.")
+
+    if current_password == new_password:
+        raise ValueError("New password must be different from current password.")
 
     with connect() as db:
+        identity = db.execute(
+            "SELECT id, password_hash FROM identities WHERE id = ? AND is_active = 1",
+            (identity_id,),
+        ).fetchone()
+        if not identity:
+            raise ValueError("Account not found.")
+
+        if not verify_password(current_password, identity["password_hash"]):
+            raise ValueError("The current password provided is incorrect.")
+
+        new_hash = hash_password(new_password)
         db.execute(
-            f"UPDATE identities SET {', '.join(set_clauses)} WHERE id = ? AND is_active = 1",
-            values,
+            "UPDATE identities SET password_hash = ? WHERE id = ?",
+            (new_hash, identity_id),
         )
         db.commit()
-    return get_user_profile(user_id) or {}
+        return True

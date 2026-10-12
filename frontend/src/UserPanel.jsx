@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { authFetch } from "./api";
+import ProfileEditor from "./ProfileEditor";
 import "./Auth.css";
 
 export default function UserPanel() {
@@ -440,26 +441,12 @@ export default function UserPanel() {
       {/* Profile Details Tab */}
       {activeTab === "profile" && (
         <>
-          <div className="user-info">
-            <h2>Account Details</h2>
-            <div className="info-card">
-              <p>
-                <strong>Full Name:</strong> {user?.full_name}
-              </p>
-              <p>
-                <strong>Email Address:</strong> {user?.email}
-              </p>
-              <p>
-                <strong>Phone Number:</strong> {user?.phone_number || "Not provided"}
-              </p>
-              <p>
-                <strong>Account Type:</strong> {user?.kind || "Applicant"}
-              </p>
-              <p>
-                <strong>Member Since:</strong>{" "}
-                {user?.created_at ? new Date(user.created_at).toLocaleDateString() : "N/A"}
-              </p>
-            </div>
+          <div style={{ marginBottom: "24px" }}>
+            <ProfileEditor
+              user={user}
+              onProfileUpdated={(updated) => setUser(updated)}
+              role="user"
+            />
           </div>
 
           <div className="panel-section">

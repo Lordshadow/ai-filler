@@ -21,6 +21,7 @@ from .auth.dependencies import (
 )
 from .auth.email import password_reset_email_configured, send_password_reset_email
 from .auth.service import (
+    change_password,
     create_organization_admin,
     create_password_reset,
     discard_password_reset,
@@ -358,10 +359,21 @@ class UserRegisterRequest(BaseModel):
     role: str = "user"
 
 
-class UserUpdateRequest(BaseModel):
+class ProfileUpdateRequest(BaseModel):
     full_name: str | None = None
-    date_of_birth: str | None = None
+    email: str | None = None
     phone_number: str | None = None
+    date_of_birth: str | None = None
+    organization_name: str | None = None
+    recovery_email: str | None = None
+
+
+UserUpdateRequest = ProfileUpdateRequest
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 
 @app.post("/auth/register", status_code=201)
@@ -392,6 +404,39 @@ def get_current_user_profile(
     return {"user": profile}
 
 
+@app.patch("/users/me")
+def update_current_user_profile_endpoint(
+    request: ProfileUpdateRequest,
+    identity: dict[str, object] = Depends(current_write_identity),
+) -> dict[str, object]:
+    """Allow current user/admin/super-admin to update their own profile details."""
+    try:
+        updated = update_user_profile(
+            user_id=int(identity["id"]),
+            updates=request.model_dump(exclude_unset=True),
+        )
+        return {"user": updated}
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.post("/auth/change-password")
+def change_password_endpoint(
+    request: ChangePasswordRequest,
+    identity: dict[str, object] = Depends(current_write_identity),
+) -> dict[str, str]:
+    """Secure password change requiring verification of current password."""
+    try:
+        change_password(
+            identity_id=int(identity["id"]),
+            current_password=request.current_password,
+            new_password=request.new_password,
+        )
+        return {"status": "ok", "message": "Password updated successfully."}
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
 @app.get("/users/{user_id}")
 def get_user_profile_endpoint(
     user_id: int,
@@ -418,7 +463,7 @@ def get_user_profile_endpoint(
 @app.patch("/users/{user_id}")
 def update_user_profile_endpoint(
     user_id: int,
-    request: UserUpdateRequest,
+    request: ProfileUpdateRequest,
     identity: dict[str, object] = Depends(current_write_identity),
 ) -> dict[str, object]:
     caller_id = int(identity["id"])
@@ -428,7 +473,7 @@ def update_user_profile_endpoint(
         raise HTTPException(status_code=403, detail="Permission denied to modify this user.")
 
     try:
-        updated = update_user_profile(user_id, request.model_dump())
+        updated = update_user_profile(user_id, request.model_dump(exclude_unset=True))
         return {"user": updated}
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error

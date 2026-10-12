@@ -185,3 +185,30 @@
 - [x] **Git Cleanliness**: `git diff --check` PASSED with 0 whitespace or merge conflicts.
 - [x] **Logic & Contract Integrity**: Form-ordered grouping and flat table display submissions with complete field Q&A; CSV export generates valid data; status transitions update SQLite atomically.
 - [x] **Access Control**: Status patch strictly restricted to organization admins and super admins.
+
+---
+
+## [Log Entry #8] 2026-10-12 11:50:00 UTC - Production-Grade User & Admin Profile Management (Editing Hub, Security & Password Lifecycle, Organization Settings)
+
+### Metadata
+- **Summary**: Implemented production-grade profile editing options for both regular users (applicants) and administrators (Organization Admin and Super Admin). Following industry best practices (Auth0, Clerk, WorkOS), built modular `ProfileEditor.jsx` with dynamic initials avatar, account metadata badges, 3-tab layout (Personal Information, Security & Password, Organization & System), dirty state tracking with unsaved changes warnings, live password strength checklist (min 8 chars, uppercase, lowercase, special/number), show/hide password toggles, auto-dismiss toast notifications, and full backend support via `PATCH /users/me`, `PATCH /users/{id}`, and `POST /auth/change-password`.
+- **Delta**: 7 files changed across frontend ProfileEditor, UserPanel, AdminPanel, SuperAdminPanel, Auth CSS, backend auth service, main API router, and platform integration tests.
+- **Deterministic Gate**: PASS (Tests: 24/24 passed [11 platform workflows + 4 CSRF/CORS integration + 9 Auth API], Frontend Vite Build: 0 errors).
+
+### Audit Findings Matrix
+
+| Ref (File:Line) | Severity | Category | Issue & Evidence | Recommended Action / Status |
+| :--- | :--- | :--- | :--- | :--- |
+| `frontend/src/ProfileEditor.jsx:1` | HIGH | Feature Gap / UI Surface | Users and admins previously had only static, read-only text cards for their account details with no capability to edit profiles, contact info, or passwords. | **Fixed**: Built production-grade `ProfileEditor.jsx` with real-time field validation, unsaved changes detection, password strength meter, organization management, and integrated into `UserPanel`, `AdminPanel`, and `SuperAdminPanel`. |
+| `src/ai_filler/auth/service.py:417` | HIGH | Data & Contract Integrity | `update_user_profile` only accepted a small subset of fields, did not allow updating email or organization name, and lacked duplicate email checks during profile updates. | **Fixed**: Expanded `update_user_profile` to support `full_name`, `email` (with RFC regex and uniqueness validation against other accounts), `phone_number` (E.164), `date_of_birth` (min age 18), `organization_name` (with organization uniqueness checks), and `recovery_email`. |
+| `src/ai_filler/auth/service.py:512` | HIGH | Security / Credential Lifecycle | System lacked an authenticated password change mechanism; accounts could only reset passwords via external email reset tokens. | **Fixed**: Implemented `change_password` requiring current password verification, minimum 8 characters complexity, ensuring distinct new passwords, and atomic hash updates in SQLite. |
+| `src/ai_filler/main.py:392` | MEDIUM | RESTful API Extension | Missing dedicated `PATCH /users/me` and `POST /auth/change-password` routes; authenticated callers had to know their own integer user ID or lacked CSRF-protected write endpoints. | **Fixed**: Added `PATCH /users/me` and `POST /auth/change-password` protected by `current_write_identity` (enforcing CSRF token validation). |
+| `src/ai_filler/auth/service.py:36` | MEDIUM | Data Enrichment | `_public` and `get_user_profile` did not join `organizations` table, leaving `organization_name` blank in profile queries. | **Fixed**: Added `LEFT JOIN organizations o ON i.organization_id = o.id` to `authenticate` and `get_user_profile`, ensuring real-time organization names across all identity responses. |
+| `tests/test_platform_workflows.py:710` | MEDIUM | Regression Guard | Absence of integration tests verifying profile updates, email collisions, phone format rejection, and password change with subsequent login. | **Fixed**: Added `test_user_profile_edit_and_password_change` and `test_admin_profile_edit_and_organization_update` covering validation rejections, password transitions, and logins with updated credentials. |
+
+### Verification Sign-Off
+- [x] **Deterministic CLI Gate**: `pytest tests/test_platform_workflows.py tests/test_document_csrf.py tests/test_auth_api.py` PASSED (24/24).
+- [x] **Frontend Production Build**: `npm --prefix frontend run build` compiled cleanly in 693ms with 0 errors.
+- [x] **Git Cleanliness**: `git diff --check` PASSED with 0 whitespace or merge conflicts.
+- [x] **Logic & Contract Integrity**: User and admin profiles update atomically; duplicate emails and invalid formats rejected (400); password changes require valid current credentials and authenticate on next login.
+- [x] **Access Control**: Users can only modify their own profile (`PATCH /users/me` or self-check on `/users/{id}`); admin organization updates require admin privileges.
