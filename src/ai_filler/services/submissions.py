@@ -243,15 +243,34 @@ def get_applications(user: dict[str, Any]) -> list[dict[str, Any]]:
         org_id = user.get("organization_id")
 
         if kind == "super_admin":
-            rows = db.execute("SELECT * FROM applications ORDER BY submitted_at DESC").fetchall()
+            rows = db.execute(
+                """SELECT a.*, f.title AS form_title, i.email AS user_email, i.full_name AS user_name, o.name AS organization_name
+                FROM applications a
+                LEFT JOIN forms f ON a.form_id = f.id
+                LEFT JOIN identities i ON a.user_id = i.id
+                LEFT JOIN organizations o ON a.organization_id = o.id
+                ORDER BY a.submitted_at DESC"""
+            ).fetchall()
         elif kind == "organization_admin":
             rows = db.execute(
-                "SELECT * FROM applications WHERE organization_id = ? ORDER BY submitted_at DESC",
-                (org_id,),
+                """SELECT a.*, f.title AS form_title, i.email AS user_email, i.full_name AS user_name, o.name AS organization_name
+                FROM applications a
+                LEFT JOIN forms f ON a.form_id = f.id
+                LEFT JOIN identities i ON a.user_id = i.id
+                LEFT JOIN organizations o ON a.organization_id = o.id
+                WHERE a.organization_id = ? OR f.organization_id = ? OR (f.organization_id IS NULL AND a.organization_id IS NULL)
+                ORDER BY a.submitted_at DESC""",
+                (org_id, org_id),
             ).fetchall()
         else:
             rows = db.execute(
-                "SELECT * FROM applications WHERE user_id = ? ORDER BY submitted_at DESC",
+                """SELECT a.*, f.title AS form_title, i.email AS user_email, i.full_name AS user_name, o.name AS organization_name
+                FROM applications a
+                LEFT JOIN forms f ON a.form_id = f.id
+                LEFT JOIN identities i ON a.user_id = i.id
+                LEFT JOIN organizations o ON a.organization_id = o.id
+                WHERE a.user_id = ?
+                ORDER BY a.submitted_at DESC""",
                 (user_id,),
             ).fetchall()
 
@@ -260,20 +279,103 @@ def get_applications(user: dict[str, Any]) -> list[dict[str, Any]]:
                 "applicationId": r["id"],
                 "draftId": r["draft_id"],
                 "formId": r["form_id"],
+                "formTitle": r["form_title"] or r["form_id"],
                 "formVersion": r["form_version"],
                 "userId": r["user_id"],
+                "userName": r["user_name"],
+                "userEmail": r["user_email"],
                 "organizationId": r["organization_id"],
+                "organizationName": r["organization_name"],
                 "status": r["status"],
                 "data": json.loads(r["data"]),
                 "submittedAt": r["submitted_at"],
+                "updatedAt": r["updated_at"],
             }
             for r in rows
         ]
 
 
+VALID_APPLICATION_STATUSES = {"SUBMITTED", "UNDER_REVIEW", "APPROVED", "REJECTED"}
+
+
+def update_application_status(
+    app_id: str,
+    new_status: str,
+    admin_user: dict[str, Any],
+) -> dict[str, Any]:
+    new_status = new_status.strip().upper()
+    if new_status not in VALID_APPLICATION_STATUSES:
+        raise ValueError(
+            f"Invalid status '{new_status}'. Allowed statuses are: {', '.join(sorted(VALID_APPLICATION_STATUSES))}."
+        )
+
+    with connect() as db:
+        r = db.execute(
+            """SELECT a.*, f.organization_id AS form_org_id
+            FROM applications a
+            LEFT JOIN forms f ON a.form_id = f.id
+            WHERE a.id = ?""",
+            (app_id,),
+        ).fetchone()
+        if not r:
+            raise LookupError(f"Application '{app_id}' not found.")
+
+        kind = admin_user.get("kind")
+        org_id = admin_user.get("organization_id")
+        is_super = kind == "super_admin"
+        is_org_admin = kind == "organization_admin" and (
+            r["organization_id"] == org_id
+            or r["form_org_id"] == org_id
+            or org_id is None
+        )
+
+        if not (is_super or is_org_admin):
+            raise PermissionError("Access forbidden: You cannot modify applications outside your organization.")
+
+        db.execute(
+            "UPDATE applications SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (new_status, app_id),
+        )
+
+        updated = db.execute(
+            """SELECT a.*, f.title AS form_title, i.email AS user_email, i.full_name AS user_name, o.name AS organization_name
+            FROM applications a
+            LEFT JOIN forms f ON a.form_id = f.id
+            LEFT JOIN identities i ON a.user_id = i.id
+            LEFT JOIN organizations o ON a.organization_id = o.id
+            WHERE a.id = ?""",
+            (app_id,),
+        ).fetchone()
+
+        return {
+            "applicationId": updated["id"],
+            "draftId": updated["draft_id"],
+            "formId": updated["form_id"],
+            "formTitle": updated["form_title"] or updated["form_id"],
+            "formVersion": updated["form_version"],
+            "userId": updated["user_id"],
+            "userName": updated["user_name"],
+            "userEmail": updated["user_email"],
+            "organizationId": updated["organization_id"],
+            "organizationName": updated["organization_name"],
+            "status": updated["status"],
+            "data": json.loads(updated["data"]),
+            "submittedAt": updated["submitted_at"],
+            "updatedAt": updated["updated_at"],
+        }
+
+
 def get_application_by_id(app_id: str, user: dict[str, Any]) -> dict[str, Any] | None:
     with connect() as db:
-        r = db.execute("SELECT * FROM applications WHERE id = ?", (app_id,)).fetchone()
+        r = db.execute(
+            """SELECT a.*, f.title AS form_title, i.email AS user_email, i.full_name AS user_name, o.name AS organization_name
+            FROM applications a
+            LEFT JOIN forms f ON a.form_id = f.id
+            LEFT JOIN identities i ON a.user_id = i.id
+            LEFT JOIN organizations o ON a.organization_id = o.id
+            WHERE a.id = ?""",
+            (app_id,),
+        ).fetchone()
         if not r:
             return None
 
@@ -282,7 +384,9 @@ def get_application_by_id(app_id: str, user: dict[str, Any]) -> dict[str, Any] |
         org_id = user.get("organization_id")
 
         is_owner = r["user_id"] == user_id
-        is_org_admin = kind == "organization_admin" and r["organization_id"] == org_id
+        is_org_admin = kind == "organization_admin" and (
+            r["organization_id"] == org_id or r.get("form_org_id") == org_id or org_id is None
+        )
         is_super = kind == "super_admin"
 
         if not (is_owner or is_org_admin or is_super):
@@ -292,9 +396,13 @@ def get_application_by_id(app_id: str, user: dict[str, Any]) -> dict[str, Any] |
             "applicationId": r["id"],
             "draftId": r["draft_id"],
             "formId": r["form_id"],
+            "formTitle": r["form_title"] or r["form_id"],
             "formVersion": r["form_version"],
             "userId": r["user_id"],
+            "userName": r["user_name"],
+            "userEmail": r["user_email"],
             "organizationId": r["organization_id"],
+            "organizationName": r["organization_name"],
             "status": r["status"],
             "data": json.loads(r["data"]),
             "submittedAt": r["submitted_at"],

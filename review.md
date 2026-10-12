@@ -158,3 +158,30 @@
 - [x] **Frontend Production Build**: `npm --prefix frontend run build` compiled in 570ms with 0 errors.
 - [x] **Git Cleanliness**: `git diff --check` PASSED with 0 whitespace or merge conflicts.
 - [x] **Logic & Contract Integrity**: "No form available in the UI" displays when no forms exist; admin-published forms immediately appear on the user page; applications submit with HTTP 201.
+
+---
+
+## [Log Entry #7] 2026-10-12 11:35:00 UTC - Production-Grade Submissions Management Hub (Form-Ordered View, KPI Metrics, Status Lifecycle & Slide-Out Inspector)
+
+### Metadata
+- **Summary**: Implemented a comprehensive, production-grade form submissions management hub in the administrative panels (`/admin-panel` and `/super-admin-panel`). Supports "Form Order" grouped view (grouping filled applications under collapsible form headers with submission counts and completion ratios) and "Flat Table" view. Features 5 real-time KPI metric cards, multi-field search, status filtering (`SUBMITTED`, `UNDER_REVIEW`, `APPROVED`, `REJECTED`), client-side CSV export, inline status lifecycle management with RESTful `PATCH /applications/{id}/status`, and an Airtable/Typeform-style slide-out inspector drawer for field-by-field Q&A evaluation.
+- **Delta**: 6 files changed across frontend SubmissionsManager, AdminPanel, SuperAdminPanel, Auth CSS, backend submissions service, main API router, and platform integration tests.
+- **Deterministic Gate**: PASS (Tests: 22/22 passed [9 platform workflows + 4 CSRF/CORS integration + 9 Auth API], Frontend Vite Build: 0 errors).
+
+### Audit Findings Matrix
+
+| Ref (File:Line) | Severity | Category | Issue & Evidence | Recommended Action / Status |
+| :--- | :--- | :--- | :--- | :--- |
+| `frontend/src/SubmissionsManager.jsx:1` | HIGH | Feature Gap / UI Surface | Administrators lacked a dedicated, tabular and form-ordered dashboard to review and manage applicant submissions; submissions were previously only exposed through raw API endpoints. | **Fixed**: Created `SubmissionsManager.jsx` with KPI metrics cards, "Form Order" grouped view and "Flat Table" view, multi-dimensional search/filter/sort, CSV export, and slide-out inspector drawer. |
+| `src/ai_filler/services/submissions.py:247` | HIGH | Data Enrichment & Tenancy | `get_applications` only returned raw `user_id` and `form_id` without human-readable form titles or applicant names/emails, and organization admins could not view submissions to their forms made by unassigned users. | **Fixed**: Enriched query with `LEFT JOIN` on `forms`, `identities`, and `organizations` returning `formTitle`, `userName`, `userEmail`, and `organizationName`. Broadened tenant check to include `f.organization_id = ?`. |
+| `src/ai_filler/services/submissions.py:302` | MEDIUM | Status Lifecycle & RBAC | Submissions lacked status update workflow; applications remained perpetually in `SUBMITTED` state without review progression. | **Fixed**: Implemented `update_application_status` supporting `SUBMITTED`, `UNDER_REVIEW`, `APPROVED`, and `REJECTED` with organization-scoped RBAC and explicit validation. |
+| `src/ai_filler/main.py:718` | MEDIUM | RESTful API Extension | Missing administrative status patch endpoint. Non-existent IDs originally raised unhandled errors rather than standard HTTP 404. | **Fixed**: Added `PATCH /applications/{application_id}/status` endpoint with `LookupError` -> HTTP 404, `ValueError` -> HTTP 400, and `PermissionError` -> HTTP 403 handling. |
+| `frontend/src/AdminPanel.jsx:87` | LOW | Navigation / Layout | Admin panel had no tab to navigate to the submissions table. | **Fixed**: Added Submissions tab as primary active view in `AdminPanel.jsx` and added tab in `SuperAdminPanel.jsx`. |
+| `tests/test_platform_workflows.py:606` | MEDIUM | Regression Guard | Lack of integration test validating administrative submission listing, enriched metadata fields, status transition lifecycle, and RBAC rejection. | **Fixed**: Added `test_admin_submissions_list_and_status_update` verifying end-to-end listing, status transitions, invalid status handling, and unprivileged user rejection. |
+
+### Verification Sign-Off
+- [x] **Deterministic CLI Gate**: `pytest tests/test_platform_workflows.py tests/test_document_csrf.py tests/test_auth_api.py` PASSED (22/22).
+- [x] **Frontend Production Build**: `npm --prefix frontend run build` compiled in 635ms with 0 errors.
+- [x] **Git Cleanliness**: `git diff --check` PASSED with 0 whitespace or merge conflicts.
+- [x] **Logic & Contract Integrity**: Form-ordered grouping and flat table display submissions with complete field Q&A; CSV export generates valid data; status transitions update SQLite atomically.
+- [x] **Access Control**: Status patch strictly restricted to organization admins and super admins.

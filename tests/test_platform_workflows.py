@@ -600,3 +600,109 @@ def test_available_forms_published_visibility_and_empty_state(test_setup):
     )
     assert sub_resp.status_code == 201
     assert sub_resp.json()["application"]["status"] == "SUBMITTED"
+
+
+def test_admin_submissions_list_and_status_update(test_setup):
+    admin_headers = test_setup["admin_headers"]
+    user_headers = test_setup["user_headers"]
+
+    # 1. Admin creates and publishes a new form
+    form_id = f"frm_rev_{uuid.uuid4().hex[:8]}"
+    create_resp = client.post(
+        "/forms",
+        json={
+            "form_id": form_id,
+            "title": "Onboarding Review Form",
+            "description": "Form for review testing",
+            "fields": [
+                {"fieldKey": "applicant_name", "type": "text", "label": "Full Name", "required": True},
+                {"fieldKey": "experience_years", "type": "number", "label": "Years of Experience", "required": False},
+            ],
+            "publish": True,
+        },
+        headers=admin_headers,
+    )
+    assert create_resp.status_code == 201
+
+    # 2. User submits an application
+    sub_resp = client.post(
+        "/applications",
+        json={
+            "form_id": form_id,
+            "form_version": 1,
+            "data": {
+                "applicant_name": "Jane Doe",
+                "experience_years": 5,
+            },
+        },
+        headers={
+            **user_headers,
+            "Idempotency-Key": f"idem_{uuid.uuid4().hex}",
+        },
+    )
+    assert sub_resp.status_code == 201
+    application_id = sub_resp.json()["application"]["applicationId"]
+    assert sub_resp.json()["application"]["status"] == "SUBMITTED"
+
+    # 3. Admin retrieves applications list and verifies enriched metadata
+    list_resp = client.get("/applications", headers=admin_headers)
+    assert list_resp.status_code == 200
+    apps = list_resp.json()["applications"]
+    target_app = next((a for a in apps if a["applicationId"] == application_id), None)
+    assert target_app is not None
+    assert target_app["formTitle"] == "Onboarding Review Form"
+    assert target_app["userName"] == "Jane Doe"
+    assert target_app["userEmail"] == "jane@example.com"
+    assert target_app["status"] == "SUBMITTED"
+
+    # 4. Admin updates status to UNDER_REVIEW
+    patch_resp1 = client.patch(
+        f"/applications/{application_id}/status",
+        json={"status": "UNDER_REVIEW"},
+        headers=admin_headers,
+    )
+    assert patch_resp1.status_code == 200
+    assert patch_resp1.json()["application"]["status"] == "UNDER_REVIEW"
+
+    # 5. Admin updates status to APPROVED
+    patch_resp2 = client.patch(
+        f"/applications/{application_id}/status",
+        json={"status": "APPROVED"},
+        headers=admin_headers,
+    )
+    assert patch_resp2.status_code == 200
+    assert patch_resp2.json()["application"]["status"] == "APPROVED"
+
+    # 6. Admin updates status to REJECTED
+    patch_resp3 = client.patch(
+        f"/applications/{application_id}/status",
+        json={"status": "REJECTED"},
+        headers=admin_headers,
+    )
+    assert patch_resp3.status_code == 200
+    assert patch_resp3.json()["application"]["status"] == "REJECTED"
+
+    # 7. Validation: Invalid status fails with 400
+    invalid_resp = client.patch(
+        f"/applications/{application_id}/status",
+        json={"status": "INVALID_STATUS"},
+        headers=admin_headers,
+    )
+    assert invalid_resp.status_code == 400
+    assert "Invalid status" in invalid_resp.json()["detail"]
+
+    # 8. RBAC: Regular user cannot update application status (403)
+    user_patch_resp = client.patch(
+        f"/applications/{application_id}/status",
+        json={"status": "APPROVED"},
+        headers=user_headers,
+    )
+    assert user_patch_resp.status_code == 403
+
+    # 9. 404 for non-existent application
+    not_found_resp = client.patch(
+        "/applications/non_existent_app_9999/status",
+        json={"status": "APPROVED"},
+        headers=admin_headers,
+    )
+    assert not_found_resp.status_code == 404

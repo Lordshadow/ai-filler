@@ -41,6 +41,7 @@ from .services.submissions import (
     get_application_by_id,
     get_applications,
     submit_application,
+    update_application_status,
 )
 from .test import test_function
 
@@ -708,3 +709,28 @@ def get_application_endpoint(
         return {"application": app_record}
     except PermissionError as error:
         raise HTTPException(status_code=403, detail=str(error)) from error
+
+
+class ApplicationStatusUpdateRequest(BaseModel):
+    status: str
+
+
+@app.patch("/applications/{application_id}/status")
+def update_application_status_endpoint(
+    application_id: str,
+    request: ApplicationStatusUpdateRequest,
+    identity: dict[str, object] = Depends(current_admin),
+) -> dict[str, Any]:
+    try:
+        updated = update_application_status(
+            app_id=application_id,
+            new_status=request.status,
+            admin_user=identity,
+        )
+        return {"application": updated}
+    except LookupError as not_found_err:
+        raise HTTPException(status_code=404, detail=str(not_found_err)) from not_found_err
+    except ValueError as val_err:
+        raise HTTPException(status_code=400, detail=str(val_err)) from val_err
+    except PermissionError as perm_err:
+        raise HTTPException(status_code=403, detail=str(perm_err)) from perm_err

@@ -3,13 +3,14 @@ import { useNavigate } from "react-router-dom";
 import { authFetch } from "./api";
 import "./Auth.css";
 import FormBuilder from "./FormBuilder";
+import SubmissionsManager from "./SubmissionsManager";
 
 export default function SuperAdminPanel() {
   const [form, setForm] = useState({ organization_name: "", full_name: "", email: "", password: "" });
   const [error, setError] = useState("");
   const [createdId, setCreatedId] = useState("");
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("admins"); // "admins" | "forms"
+  const [activeTab, setActiveTab] = useState("submissions"); // "submissions" | "admins" | "forms"
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -65,6 +66,12 @@ export default function SuperAdminPanel() {
       {/* Tabs */}
       <div className="auth-tabs" style={{ marginBottom: "24px" }}>
         <button
+          className={`tab ${activeTab === "submissions" ? "active" : ""}`}
+          onClick={() => setActiveTab("submissions")}
+        >
+          📥 Filled Forms & Submissions
+        </button>
+        <button
           className={`tab ${activeTab === "admins" ? "active" : ""}`}
           onClick={() => setActiveTab("admins")}
         >
@@ -77,6 +84,12 @@ export default function SuperAdminPanel() {
           📋 Global Form Templates
         </button>
       </div>
+
+      {activeTab === "submissions" && (
+        <section className="panel-section">
+          <SubmissionsManager />
+        </section>
+      )}
 
       {activeTab === "admins" && (
         <section className="panel-section" style={{ maxWidth: "600px", margin: "0 auto" }}>

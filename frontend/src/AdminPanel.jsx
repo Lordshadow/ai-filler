@@ -3,12 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { authFetch } from "./api";
 import "./Auth.css";
 import FormBuilder from "./FormBuilder";
+import SubmissionsManager from "./SubmissionsManager";
 
 export default function AdminPanel() {
   const [admin, setAdmin] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [activeTab, setActiveTab] = useState("forms"); // "forms" | "users" | "settings"
+  const [activeTab, setActiveTab] = useState("submissions"); // "submissions" | "forms" | "users" | "settings"
   const [showCreateUser, setShowCreateUser] = useState(false);
   const [newUser, setNewUser] = useState({
     full_name: "",
@@ -101,6 +102,12 @@ export default function AdminPanel() {
       {/* Navigation Tabs */}
       <div className="auth-tabs" style={{ marginBottom: "24px" }}>
         <button
+          className={`tab ${activeTab === "submissions" ? "active" : ""}`}
+          onClick={() => setActiveTab("submissions")}
+        >
+          📥 Filled Forms & Submissions
+        </button>
+        <button
           className={`tab ${activeTab === "forms" ? "active" : ""}`}
           onClick={() => setActiveTab("forms")}
         >
@@ -119,6 +126,13 @@ export default function AdminPanel() {
           🏢 Organization Profile
         </button>
       </div>
+
+      {/* Tab: Filled Forms & Submissions */}
+      {activeTab === "submissions" && (
+        <div className="panel-section">
+          <SubmissionsManager />
+        </div>
+      )}
 
       {/* Tab 1: Dynamic Form Builder */}
       {activeTab === "forms" && (
