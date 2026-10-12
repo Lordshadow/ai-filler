@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Cookie, Depends, Header, HTTPException
+from fastapi import Cookie, Depends, Header, HTTPException, Request
 
 from .service import CSRFError, authenticate
 
@@ -30,14 +30,18 @@ def current_identity(
 
 
 def current_write_identity(
+    request: Request,
     session_token: Annotated[str | None, Cookie()] = None,
     authorization: Annotated[str | None, Header(alias="Authorization")] = None,
     csrf_token: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
 ) -> dict[str, object]:
     token, is_bearer = _extract_token(session_token, authorization)
     try:
-        # Bearer tokens in headers are not subject to CSRF vulnerabilities
-        return authenticate(token, csrf_token, require_csrf=(not is_bearer))
+        # Bearer tokens in headers are not subject to CSRF vulnerabilities.
+        # Safe HTTP methods (GET, HEAD, OPTIONS) do not mutate state and do not require CSRF tokens.
+        is_safe_method = request is not None and request.method in ("GET", "HEAD", "OPTIONS")
+        require_csrf = (not is_bearer) and (not is_safe_method)
+        return authenticate(token, csrf_token, require_csrf=require_csrf)
     except CSRFError as error:
         raise HTTPException(status_code=403, detail=str(error)) from error
     except PermissionError as error:

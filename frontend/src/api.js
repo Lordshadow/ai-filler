@@ -49,15 +49,15 @@ export async function authFetch(path, options = {}) {
       : { ...(options.headers || {}) };
   const method = (options.method || "GET").toUpperCase();
 
-  if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
-    const csrf = getCsrfToken();
-    const hasCsrf = Object.keys(headers).some(
-      (k) => k.toLowerCase() === "x-csrf-token"
-    );
-    if (csrf && !hasCsrf) {
-      headers["X-CSRF-Token"] = csrf;
-    }
+  const csrf = getCsrfToken();
+  const hasCsrf = Object.keys(headers).some(
+    (k) => k.toLowerCase() === "x-csrf-token"
+  );
+  if (csrf && !hasCsrf) {
+    headers["X-CSRF-Token"] = csrf;
+  }
 
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
     const hasContentType = Object.keys(headers).some(
       (k) => k.toLowerCase() === "content-type"
     );

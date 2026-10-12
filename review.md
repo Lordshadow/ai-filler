@@ -280,3 +280,25 @@
 - [x] **Git Cleanliness**: `git diff --check` PASSED with 0 whitespace or merge conflicts.
 - [x] **Database Schema**: All 11 tables in SQLite inspected; foreign keys, unique constraints, and indices confirmed 100% sound.
 - [x] **Directory Visibility**: Existing organization admin (`Saravanan`, `ADM-B44FDBAF9FAF`, `Techjays`) is fetched eagerly and immediately visible in the Super Admin console.
+
+---
+
+## [Log Entry #11] 2026-10-12 12:32:00 UTC - Safe Method CSRF Exemption & Client-Side CSRF Token Propagation
+
+### Metadata
+- **Summary**: Rectified HTTP 403 Forbidden on `GET /organizations` and `GET /auth/super/organization-admins`. The root cause was that `current_write_identity` in `dependencies.py` demanded `X-CSRF-Token` validation across all HTTP verbs indiscriminately, rejecting idempotent read queries (`GET`), while `authFetch` in `frontend/src/api.js` omitted `X-CSRF-Token` headers on non-mutating requests according to standard HTTP semantics. Resolved by: (1) making `current_write_identity` dynamically inspect `request.method` and exempt safe methods (`GET`, `HEAD`, `OPTIONS`) while strictly enforcing CSRF on mutations (`POST`, `PUT`, `PATCH`, `DELETE`); and (2) updating `authFetch` in `api.js` to propagate `X-CSRF-Token` whenever the cookie is present across all requests for defense-in-depth.
+- **Delta**: 2 files modified across backend dependencies and frontend API layer.
+- **Deterministic Gate**: PASS (Tests: 27/27 passed [12 platform workflows + 4 CSRF/CORS integration + 11 Auth API], Frontend Vite Build: 0 errors in 682ms, Git diff check: 0 errors).
+
+### Audit Findings Matrix
+
+| Ref (File:Line) | Severity | Category | Issue & Evidence | Recommended Action / Status |
+| :--- | :--- | :--- | :--- | :--- |
+| `src/ai_filler/auth/dependencies.py:32` | CRITICAL | Security Protocol / False Positive | `current_write_identity` required CSRF tokens for all requests without checking the HTTP method. Consequently, `GET /organizations` and `GET /auth/super/organization-admins` returned HTTP 403 Forbidden with `{"detail": "CSRF validation failed."}`, preventing the UI from loading tenants and admins. | **Fixed**: Added `request: Request` to `current_write_identity` and exempted safe methods (`is_safe_method = request.method in ("GET", "HEAD", "OPTIONS")`) while preserving strict CSRF enforcement for mutating verbs (`POST`, `PUT`, `PATCH`, `DELETE`). |
+| `frontend/src/api.js:52` | MEDIUM | Frontend Client / Protocol Robustness | `authFetch` only appended `X-CSRF-Token` when the HTTP method was strictly `POST`, `PUT`, `PATCH`, or `DELETE`. | **Fixed**: Updated `authFetch` to unconditionally attach `X-CSRF-Token` whenever the `csrf_token` cookie is present in `document.cookie`, providing robust defense-in-depth. |
+
+### Verification Sign-Off
+- [x] **Deterministic CLI Gate**: `pytest tests/test_platform_workflows.py tests/test_document_csrf.py tests/test_auth_api.py` PASSED (27/27).
+- [x] **Frontend Production Build**: `npm --prefix frontend run build` compiled cleanly in 682ms with 0 errors.
+- [x] **Git Cleanliness**: `git diff --check` PASSED with 0 whitespace or merge conflicts.
+- [x] **Integration Verification**: Verified via live curl and Python test client that `GET /organizations` and `GET /auth/super/organization-admins` return `200 OK` without CSRF headers, and mutating `POST /organizations` still strictly rejects requests without CSRF (`403 Forbidden`).
