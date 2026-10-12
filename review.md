@@ -212,3 +212,29 @@
 - [x] **Git Cleanliness**: `git diff --check` PASSED with 0 whitespace or merge conflicts.
 - [x] **Logic & Contract Integrity**: User and admin profiles update atomically; duplicate emails and invalid formats rejected (400); password changes require valid current credentials and authenticate on next login.
 - [x] **Access Control**: Users can only modify their own profile (`PATCH /users/me` or self-check on `/users/{id}`); admin organization updates require admin privileges.
+
+---
+
+## [Log Entry #9] 2026-10-12 12:05:00 UTC - Super Admin Governance Refactoring (Sole Focus on Organizations & Organization Admins)
+
+### Metadata
+- **Summary**: Refactored the Super Admin portal according to strict enterprise governance boundaries. Removed user forms management (FormBuilder) and applicant submission views (SubmissionsManager) from the Super Admin console. Re-engineered the Super Admin dashboard into a dedicated Governance Hub focused exclusively on Organizations Management (listing, creating, renaming tenants with admin/form metrics) and Organization Admins Management (directory listing, provisioning with existing or new organization assignment, status activation/suspension, contact details editing, and emergency password resets), backed by comprehensive RESTful APIs and regression tests.
+- **Delta**: 4 files changed across frontend SuperAdminPanel, backend auth service, main API router, and platform integration tests.
+- **Deterministic Gate**: PASS (Tests: 25/25 passed [12 platform workflows + 4 CSRF/CORS integration + 9 Auth API], Frontend Vite Build: 0 errors).
+
+### Audit Findings Matrix
+
+| Ref (File:Line) | Severity | Category | Issue & Evidence | Recommended Action / Status |
+| :--- | :--- | :--- | :--- | :--- |
+| `frontend/src/SuperAdminPanel.jsx:70` | HIGH | Separation of Concerns | Super Admin portal previously exposed applicant form builders and user submissions, violating organizational governance separation. Super Admins also lacked interfaces to view existing organizations or manage provisioned admins. | **Fixed**: Removed form and submission tabs. Re-architected `SuperAdminPanel.jsx` with dedicated "🏢 Organizations Directory", "👥 Organization Admins Directory", and "⚙️ Super Admin Profile & Security" views. |
+| `src/ai_filler/auth/service.py:545` | HIGH | Capability Gap / Governance | Backend lacked capabilities to list all organizations with tenant metrics (admin count, form count, submission count), rename organizations, or manage admin accounts. | **Fixed**: Implemented `list_organizations()`, `create_organization()`, and `update_organization()` with unique collision guards. |
+| `src/ai_filler/auth/service.py:648` | HIGH | Admin Lifecycle Management | Super Admins had no API to list provisioned organization admins, edit their profiles, toggle active/suspended statuses, or reset admin passwords. | **Fixed**: Implemented `list_organization_admins()`, `update_organization_admin_by_super()`, and `reset_admin_password_by_super()` with automatic session revocation. |
+| `src/ai_filler/main.py:222` | MEDIUM | RESTful API Extension | Missing dedicated governance endpoints for organization and administrator lifecycle management. | **Fixed**: Added `GET /organizations`, `POST /organizations`, `PATCH /organizations/{id}`, `GET /auth/super/organization-admins`, `PATCH /auth/super/organization-admins/{id}`, and `POST /auth/super/organization-admins/{id}/reset-password`. |
+| `tests/test_platform_workflows.py:863` | MEDIUM | Regression Guard | Lack of automated tests verifying Super Admin listing and updating organizations, updating admin details, resetting admin passwords, and unprivileged user rejection. | **Fixed**: Added `test_super_admin_governance_of_organizations_and_admins` verifying organization lifecycle, admin updates, password resets with login verification, and RBAC rejection (403). |
+
+### Verification Sign-Off
+- [x] **Deterministic CLI Gate**: `pytest tests/test_platform_workflows.py tests/test_document_csrf.py tests/test_auth_api.py` PASSED (25/25).
+- [x] **Frontend Production Build**: `npm --prefix frontend run build` compiled cleanly in 705ms with 0 errors.
+- [x] **Git Cleanliness**: `git diff --check` PASSED with 0 whitespace or merge conflicts.
+- [x] **Logic & Contract Integrity**: Super Admin console strictly restricted to organizations and admin governance; user forms/submissions removed; organization creation and admin updates update SQLite atomically.
+- [x] **Access Control**: Super admin governance routes strictly guarded by `current_super_admin` (403 for non-super users).

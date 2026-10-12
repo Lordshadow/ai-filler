@@ -22,15 +22,21 @@ from .auth.dependencies import (
 from .auth.email import password_reset_email_configured, send_password_reset_email
 from .auth.service import (
     change_password,
+    create_organization,
     create_organization_admin,
     create_password_reset,
     discard_password_reset,
     get_user_profile,
+    list_organization_admins,
+    list_organizations,
     login,
     logout,
     register_user,
+    reset_admin_password_by_super,
     reset_password,
     signup,
+    update_organization,
+    update_organization_admin_by_super,
     update_user_profile,
 )
 from .services.forms import create_form, customize_form, delete_form, get_form, list_forms
@@ -82,6 +88,26 @@ class OrganizationAdminRequest(BaseModel):
     full_name: str
     email: str
     password: str
+
+
+class OrganizationCreateRequest(BaseModel):
+    name: str
+
+
+class OrganizationUpdateRequest(BaseModel):
+    name: str
+
+
+class AdminUpdateRequest(BaseModel):
+    full_name: str | None = None
+    email: str | None = None
+    phone_number: str | None = None
+    organization_id: int | None = None
+    is_active: bool | None = None
+
+
+class AdminResetPasswordRequest(BaseModel):
+    new_password: str
 
 
 class PasswordResetRequest(BaseModel):
@@ -189,6 +215,83 @@ def create_organization_admin_endpoint(
             admin_id=admin_id,
         )
         return {"admin": admin, "admin_id": admin_id}
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.get("/organizations")
+def list_organizations_endpoint(
+    identity: dict[str, object] = Depends(current_admin),
+) -> dict[str, Any]:
+    return {"organizations": list_organizations()}
+
+
+@app.post("/organizations", status_code=201)
+def create_organization_endpoint(
+    request: OrganizationCreateRequest,
+    identity: dict[str, object] = Depends(current_super_admin),
+) -> dict[str, Any]:
+    try:
+        org = create_organization(name=request.name)
+        return {"organization": org}
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.patch("/organizations/{org_id}")
+def update_organization_endpoint(
+    org_id: int,
+    request: OrganizationUpdateRequest,
+    identity: dict[str, object] = Depends(current_super_admin),
+) -> dict[str, Any]:
+    try:
+        org = update_organization(org_id=org_id, name=request.name)
+        return {"organization": org}
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.get("/auth/super/organization-admins")
+def list_organization_admins_endpoint(
+    identity: dict[str, object] = Depends(current_super_admin),
+) -> dict[str, Any]:
+    return {"admins": list_organization_admins()}
+
+
+@app.patch("/auth/super/organization-admins/{admin_id}")
+def update_organization_admin_endpoint(
+    admin_id: int,
+    request: AdminUpdateRequest,
+    identity: dict[str, object] = Depends(current_super_admin),
+) -> dict[str, Any]:
+    try:
+        updated = update_organization_admin_by_super(
+            admin_identity_id=admin_id,
+            updates=request.model_dump(exclude_unset=True),
+        )
+        return {"admin": updated}
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.post("/auth/super/organization-admins/{admin_id}/reset-password")
+def reset_admin_password_endpoint(
+    admin_id: int,
+    request: AdminResetPasswordRequest,
+    identity: dict[str, object] = Depends(current_super_admin),
+) -> dict[str, Any]:
+    try:
+        reset_admin_password_by_super(
+            admin_identity_id=admin_id,
+            new_password=request.new_password,
+        )
+        return {"status": "ok", "message": "Password reset successfully."}
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 

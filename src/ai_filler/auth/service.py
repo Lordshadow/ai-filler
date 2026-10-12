@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 import secrets
 import sqlite3
 from datetime import UTC, date, datetime, timedelta
@@ -534,6 +535,207 @@ def change_password(
         db.execute(
             "UPDATE identities SET password_hash = ? WHERE id = ?",
             (new_hash, identity_id),
+        )
+        db.commit()
+        return True
+
+
+def list_organizations() -> list[dict[str, Any]]:
+    with connect() as db:
+        rows = db.execute(
+            """SELECT o.*,
+                (SELECT COUNT(*) FROM identities WHERE organization_id = o.id AND kind = 'organization_admin') AS admin_count,
+                (SELECT COUNT(*) FROM forms WHERE organization_id = o.id) AS form_count,
+                (SELECT COUNT(*) FROM applications WHERE organization_id = o.id) AS submission_count
+            FROM organizations o
+            ORDER BY o.name COLLATE NOCASE ASC"""
+        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "createdAt": r["created_at"],
+                "adminCount": r["admin_count"],
+                "formCount": r["form_count"],
+                "submissionCount": r["submission_count"],
+            }
+            for r in rows
+        ]
+
+
+def create_organization(*, name: str) -> dict[str, Any]:
+    clean_name = name.strip()
+    if not clean_name:
+        raise ValueError("Organization name cannot be empty.")
+    with connect() as db:
+        existing = db.execute(
+            "SELECT id FROM organizations WHERE lower(name) = lower(?)", (clean_name,)
+        ).fetchone()
+        if existing:
+            raise ValueError("An organization with that name already exists.")
+        cursor = db.execute("INSERT INTO organizations (name) VALUES (?)", (clean_name,))
+        org_id = cursor.lastrowid
+        db.commit()
+        row = db.execute("SELECT * FROM organizations WHERE id = ?", (org_id,)).fetchone()
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "createdAt": row["created_at"],
+            "adminCount": 0,
+            "formCount": 0,
+            "submissionCount": 0,
+        }
+
+
+def update_organization(*, org_id: int, name: str) -> dict[str, Any]:
+    clean_name = name.strip()
+    if not clean_name:
+        raise ValueError("Organization name cannot be empty.")
+    with connect() as db:
+        org = db.execute("SELECT id FROM organizations WHERE id = ?", (org_id,)).fetchone()
+        if not org:
+            raise LookupError(f"Organization '{org_id}' not found.")
+        dup = db.execute(
+            "SELECT id FROM organizations WHERE lower(name) = lower(?) AND id != ?",
+            (clean_name, org_id),
+        ).fetchone()
+        if dup:
+            raise ValueError("An organization with that name already exists.")
+        db.execute("UPDATE organizations SET name = ? WHERE id = ?", (clean_name, org_id))
+        db.commit()
+        row = db.execute(
+            """SELECT o.*,
+                (SELECT COUNT(*) FROM identities WHERE organization_id = o.id AND kind = 'organization_admin') AS admin_count,
+                (SELECT COUNT(*) FROM forms WHERE organization_id = o.id) AS form_count,
+                (SELECT COUNT(*) FROM applications WHERE organization_id = o.id) AS submission_count
+            FROM organizations o
+            WHERE o.id = ?""",
+            (org_id,),
+        ).fetchone()
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "createdAt": row["created_at"],
+            "adminCount": row["admin_count"],
+            "formCount": row["form_count"],
+            "submissionCount": row["submission_count"],
+        }
+
+
+def list_organization_admins() -> list[dict[str, Any]]:
+    with connect() as db:
+        rows = db.execute(
+            """SELECT i.*, o.name AS organization_name
+            FROM identities i
+            LEFT JOIN organizations o ON i.organization_id = o.id
+            WHERE i.kind = 'organization_admin'
+            ORDER BY i.created_at DESC"""
+        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "adminId": r["admin_id"],
+                "fullName": r["full_name"],
+                "email": r["email"],
+                "phoneNumber": r["phone_number"],
+                "organizationId": r["organization_id"],
+                "organizationName": r["organization_name"] or "Unassigned",
+                "isActive": bool(r["is_active"]),
+                "createdAt": r["created_at"],
+            }
+            for r in rows
+        ]
+
+
+def update_organization_admin_by_super(
+    *, admin_identity_id: int, updates: dict[str, Any]
+) -> dict[str, Any]:
+    with connect() as db:
+        admin = db.execute(
+            "SELECT id, kind, organization_id FROM identities WHERE id = ? AND kind = 'organization_admin'",
+            (admin_identity_id,),
+        ).fetchone()
+        if not admin:
+            raise LookupError(f"Organization admin '{admin_identity_id}' not found.")
+
+        fields: dict[str, Any] = {}
+        if "full_name" in updates and updates["full_name"] is not None:
+            name = str(updates["full_name"]).strip()
+            if not name:
+                raise ValueError("Full name cannot be empty.")
+            fields["full_name"] = name
+
+        if "email" in updates and updates["email"] is not None:
+            email = str(updates["email"]).strip().lower()
+            validate_email(email)
+            dup = db.execute(
+                "SELECT id FROM identities WHERE lower(email) = ? AND id != ?",
+                (email, admin_identity_id),
+            ).fetchone()
+            if dup:
+                raise ValueError("An account with that email already exists.")
+            fields["email"] = email
+
+        if "phone_number" in updates and updates["phone_number"] is not None:
+            phone = str(updates["phone_number"]).strip()
+            if phone:
+                validate_phone_e164(phone)
+            fields["phone_number"] = phone or None
+
+        if "organization_id" in updates and updates["organization_id"] is not None:
+            org_id = int(updates["organization_id"])
+            org = db.execute("SELECT id FROM organizations WHERE id = ?", (org_id,)).fetchone()
+            if not org:
+                raise ValueError(f"Organization '{org_id}' does not exist.")
+            fields["organization_id"] = org_id
+
+        if "is_active" in updates and updates["is_active"] is not None:
+            fields["is_active"] = 1 if updates["is_active"] else 0
+
+        if fields:
+            set_clauses = [f"{k} = ?" for k in fields.keys()]
+            vals = list(fields.values())
+            vals.append(admin_identity_id)
+            db.execute(f"UPDATE identities SET {', '.join(set_clauses)} WHERE id = ?", vals)
+            db.commit()
+
+        row = db.execute(
+            """SELECT i.*, o.name AS organization_name
+            FROM identities i
+            LEFT JOIN organizations o ON i.organization_id = o.id
+            WHERE i.id = ?""",
+            (admin_identity_id,),
+        ).fetchone()
+        return {
+            "id": row["id"],
+            "adminId": row["admin_id"],
+            "fullName": row["full_name"],
+            "email": row["email"],
+            "phoneNumber": row["phone_number"],
+            "organizationId": row["organization_id"],
+            "organizationName": row["organization_name"] or "Unassigned",
+            "isActive": bool(row["is_active"]),
+            "createdAt": row["created_at"],
+        }
+
+
+def reset_admin_password_by_super(*, admin_identity_id: int, new_password: str) -> bool:
+    if not new_password or len(new_password) < 8:
+        raise ValueError("New password must be at least 8 characters long.")
+    with connect() as db:
+        admin = db.execute(
+            "SELECT id FROM identities WHERE id = ? AND kind = 'organization_admin'",
+            (admin_identity_id,),
+        ).fetchone()
+        if not admin:
+            raise LookupError(f"Organization admin '{admin_identity_id}' not found.")
+        db.execute(
+            "UPDATE identities SET password_hash = ? WHERE id = ?",
+            (hash_password(new_password), admin_identity_id),
+        )
+        db.execute(
+            "UPDATE sessions SET revoked_at = CURRENT_TIMESTAMP WHERE identity_id = ?",
+            (admin_identity_id,),
         )
         db.commit()
         return True

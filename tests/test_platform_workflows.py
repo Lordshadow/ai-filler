@@ -857,3 +857,79 @@ def test_admin_profile_edit_and_organization_update(test_setup):
         json={"identifier": "ADM-APEX01", "password": "NewAdminPassword123!"},
     )
     assert admin_login_resp.status_code == 200
+
+
+def test_super_admin_governance_of_organizations_and_admins(test_setup):
+    super_headers = test_setup["super_headers"]
+    user_headers = test_setup["user_headers"]
+
+    # 1. Super Admin lists organizations
+    list_orgs_resp = client.get("/organizations", headers=super_headers)
+    assert list_orgs_resp.status_code == 200
+    orgs = list_orgs_resp.json()["organizations"]
+    assert len(orgs) >= 1
+    apex_org = next((o for o in orgs if "Apex" in o["name"]), None)
+    assert apex_org is not None
+    assert apex_org["adminCount"] >= 1
+
+    # 2. Super Admin creates a new organization
+    new_org_name = f"BioTech Enterprise {uuid.uuid4().hex[:4]}"
+    create_org_resp = client.post(
+        "/organizations",
+        json={"name": new_org_name},
+        headers=super_headers,
+    )
+    assert create_org_resp.status_code == 201
+    created_org = create_org_resp.json()["organization"]
+    org_id = created_org["id"]
+    assert created_org["name"] == new_org_name
+
+    # 3. Super Admin updates/renames an organization
+    renamed_org = f"BioTech Global {uuid.uuid4().hex[:4]}"
+    update_org_resp = client.patch(
+        f"/organizations/{org_id}",
+        json={"name": renamed_org},
+        headers=super_headers,
+    )
+    assert update_org_resp.status_code == 200
+    assert update_org_resp.json()["organization"]["name"] == renamed_org
+
+    # 4. Super Admin lists organization admins
+    list_admins_resp = client.get("/auth/super/organization-admins", headers=super_headers)
+    assert list_admins_resp.status_code == 200
+    admins = list_admins_resp.json()["admins"]
+    assert len(admins) >= 1
+    target_admin = admins[0]
+    target_admin_id = target_admin["id"]
+
+    # 5. Super Admin updates admin details (e.g. phone, full name, is_active)
+    update_admin_resp = client.patch(
+        f"/auth/super/organization-admins/{target_admin_id}",
+        json={"phone_number": "+14155557777", "full_name": "Updated Admin Leader"},
+        headers=super_headers,
+    )
+    assert update_admin_resp.status_code == 200
+    assert update_admin_resp.json()["admin"]["fullName"] == "Updated Admin Leader"
+    assert update_admin_resp.json()["admin"]["phoneNumber"] == "+14155557777"
+
+    # 6. Super Admin resets admin's password
+    reset_pwd_resp = client.post(
+        f"/auth/super/organization-admins/{target_admin_id}/reset-password",
+        json={"new_password": "TemporaryAdmin123!"},
+        headers=super_headers,
+    )
+    assert reset_pwd_resp.status_code == 200
+    assert reset_pwd_resp.json()["status"] == "ok"
+
+    # 7. Admin can now sign in with the reset password
+    admin_login_resp = client.post(
+        "/auth/admin/login",
+        json={"identifier": target_admin["adminId"], "password": "TemporaryAdmin123!"},
+    )
+    assert admin_login_resp.status_code == 200
+
+    # 8. RBAC: Regular user is forbidden from super admin endpoints
+    forbidden_org_create = client.post("/organizations", json={"name": "Hacker Org"}, headers=user_headers)
+    assert forbidden_org_create.status_code == 403
+    forbidden_admins = client.get("/auth/super/organization-admins", headers=user_headers)
+    assert forbidden_admins.status_code == 403
