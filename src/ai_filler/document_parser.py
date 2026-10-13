@@ -25,7 +25,14 @@ def extract_document_text(*, file_path: str | Path, client: ChatGroq | None = No
     if suffix == ".pdf":
         text = "\n\n".join(page.extract_text() or "" for page in PdfReader(path).pages)
     elif suffix == ".docx":
-        text = "\n".join(paragraph.text for paragraph in Document(path).paragraphs)
+        doc = Document(path)
+        parts: list[str] = [p.text for p in doc.paragraphs if p.text and p.text.strip()]
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [c.text.strip() for c in row.cells if c.text and c.text.strip()]
+                if cells:
+                    parts.append(" | ".join(cells))
+        text = "\n".join(parts)
     elif suffix == ".txt":
         text = path.read_text(encoding="utf-8")
     else:

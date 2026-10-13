@@ -933,3 +933,127 @@ def test_super_admin_governance_of_organizations_and_admins(test_setup):
     assert forbidden_org_create.status_code == 403
     forbidden_admins = client.get("/auth/super/organization-admins", headers=user_headers)
     assert forbidden_admins.status_code == 403
+
+
+def test_multi_agent_admin_form_generation_and_user_form_filling(test_setup, monkeypatch):
+    import json as _json
+    admin_headers = test_setup["admin_headers"]
+    user_headers = test_setup["user_headers"]
+
+    # Disable external Groq network calls in unit test so deterministic + critic pipeline is tested deterministically
+    monkeypatch.setattr("ai_filler.agents.form_agents._invoke_structured_json", lambda *args, **kwargs: None)
+
+    # 1. Admin generates a form schema via Multi-Agent Document Upload (/ai/generate-form/document)
+    questionnaire_doc = (
+        "Title: Senior Engineer Application\n"
+        "Description: Engineering candidate evaluation form.\n"
+        "Full Legal Name *:\n"
+        "Contact Email *:\n"
+        "Date of Birth:\n"
+        "Years of Experience:\n"
+        "Department: [Engineering, Product, Design]\n"
+        "Core Skills (select all that apply): [Python, React, SQL, Docker]\n"
+    )
+    gen_doc_resp = client.post(
+        "/ai/generate-form/document",
+        files=[("files", ("questionnaire.txt", questionnaire_doc.encode("utf-8"), "text/plain"))],
+        headers=admin_headers,
+    )
+    assert gen_doc_resp.status_code == 200
+    gen_data = gen_doc_resp.json()
+    assert gen_data["accuracy_score"] >= 98.0
+    assert len(gen_data["agent_trace"]) == 3
+    assert len(gen_data["fields"]) >= 5
+
+    # 2. Admin saves and publishes the AI-generated form via POST /forms
+    form_id = f"frm_ai_{uuid.uuid4().hex[:6]}"
+    create_form_resp = client.post(
+        "/forms",
+        json={
+            "form_id": form_id,
+            "title": gen_data["title"],
+            "description": gen_data["description"],
+            "fields": gen_data["fields"],
+            "publish": True,
+        },
+        headers=admin_headers,
+    )
+    assert create_form_resp.status_code == 201
+    published_fields = create_form_resp.json()["form"]["fields"]
+
+    # 3. User fills the form using Multi-Agent Voice/Text endpoint (/ai/fill-form/text)
+    spoken_dictation = (
+        "Full Legal Name: Alex Rivera\n"
+        "Contact Email: alex.rivera at techcorp dot io\n"
+        "Date of Birth: May 14, 1995\n"
+        "Years of Experience: 8\n"
+        "Department: engineering\n"
+        "Core Skills: Python and React\n"
+    )
+    fill_text_resp = client.post(
+        "/ai/fill-form/text",
+        json={
+            "text": spoken_dictation,
+            "fields": published_fields,
+            "form_title": gen_data["title"],
+            "source_type": "AI_VOICE",
+        },
+        headers=user_headers,
+    )
+    assert fill_text_resp.status_code == 200
+    filled = fill_text_resp.json()
+    assert filled["accuracy_score"] >= 98.0
+    assert len(filled["agent_trace"]) == 3
+
+    extracted_fields = filled["fields"]
+    # Verify spoken email normalization ("at" -> "@", "dot" -> ".") and date normalization ("May 14, 1995" -> "1995-05-14")
+    email_key = next(f["fieldKey"] for f in published_fields if f["type"] == "email")
+    date_key = next(f["fieldKey"] for f in published_fields if f["type"] == "date")
+    dropdown_key = next(f["fieldKey"] for f in published_fields if f["type"] == "dropdown")
+    multi_key = next(f["fieldKey"] for f in published_fields if f["type"] == "multiselect")
+
+    assert extracted_fields[email_key] == "alex.rivera@techcorp.io"
+    assert extracted_fields[date_key] == "1995-05-14"
+    assert extracted_fields[dropdown_key] == "Engineering"
+    assert set(extracted_fields[multi_key]) == {"Python", "React"}
+
+    # 4. User fills the form via Multi-Agent Document Upload (/ai/fill-form/document)
+    applicant_doc = (
+        "Full Legal Name: Alex Rivera\n"
+        "Contact Email: alex.rivera@techcorp.io\n"
+        "Date of Birth: 1995-05-14\n"
+        "Years of Experience: 8\n"
+        "Department: Engineering\n"
+        "Core Skills: Python, React, SQL\n"
+    )
+    fill_doc_resp = client.post(
+        "/ai/fill-form/document",
+        data={
+            "fields_json": _json.dumps(published_fields),
+            "form_title": gen_data["title"],
+        },
+        files=[("files", ("applicant_resume.txt", applicant_doc.encode("utf-8"), "text/plain"))],
+        headers=user_headers,
+    )
+    assert fill_doc_resp.status_code == 200
+    doc_filled = fill_doc_resp.json()
+    assert doc_filled["accuracy_score"] >= 98.0
+    assert doc_filled["fields"][email_key] == "alex.rivera@techcorp.io"
+    assert "Python" in doc_filled["fields"][multi_key]
+
+    # 5. User submits the AI-filled application with provenance to POST /applications
+    sub_resp = client.post(
+        "/applications",
+        json={
+            "form_id": form_id,
+            "form_version": 1,
+            "data": doc_filled["fields"],
+            "provenance": doc_filled["provenance"],
+        },
+        headers={
+            **user_headers,
+            "Idempotency-Key": f"idem_ai_{uuid.uuid4().hex}",
+        },
+    )
+    assert sub_resp.status_code == 201
+    assert sub_resp.json()["application"]["status"] == "SUBMITTED"

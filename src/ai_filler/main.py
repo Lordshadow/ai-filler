@@ -1,16 +1,25 @@
 from pathlib import Path
+import json
 import os
 import re
 import secrets
 from tempfile import NamedTemporaryFile
 from typing import Any
 
-from fastapi import FastAPI, File, Header, HTTPException, Query, Response, UploadFile, status
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Response, UploadFile, status
 from fastapi import Cookie, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from .agents.form_agents import (
+    fill_form_from_document_multi_agent,
+    fill_form_from_voice_multi_agent,
+    fill_form_multi_agent,
+    generate_form_from_document_multi_agent,
+    generate_form_from_voice_multi_agent,
+    generate_form_schema_multi_agent,
+)
 from .services.main import create_application, process_documents, transcribe_audio
 from .auth.dependencies import (
     current_admin,
@@ -882,3 +891,244 @@ def update_application_status_endpoint(
         raise HTTPException(status_code=400, detail=str(val_err)) from val_err
     except PermissionError as perm_err:
         raise HTTPException(status_code=403, detail=str(perm_err)) from perm_err
+
+
+# ── Multi-Agent AI Form Filling & Schema Architect Service ─────────────
+
+
+class AIFillFormTextRequest(BaseModel):
+    text: str
+    fields: list[dict[str, Any]]
+    form_title: str = ""
+    target_field_key: str | None = None
+    current_data: dict[str, Any] | None = None
+    source_type: str = "AI_VOICE"
+
+
+class AIGenerateFormTextRequest(BaseModel):
+    text: str
+    existing_fields: list[dict[str, Any]] | None = None
+    source_type: str = "AI_VOICE"
+
+
+def _parse_json_list(raw: str | None, field_name: str) -> list[dict[str, Any]]:
+    if not raw or not raw.strip():
+        return []
+    try:
+        parsed = json.loads(raw)
+        if not isinstance(parsed, list):
+            raise ValueError(f"{field_name} must be a JSON array.")
+        return parsed
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name}: {exc}") from exc
+
+
+def _parse_json_dict(raw: str | None, field_name: str) -> dict[str, Any] | None:
+    if not raw or not raw.strip():
+        return None
+    try:
+        parsed = json.loads(raw)
+        if not isinstance(parsed, dict):
+            raise ValueError(f"{field_name} must be a JSON object.")
+        return parsed
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name}: {exc}") from exc
+
+
+@app.post("/ai/fill-form/voice")
+async def ai_fill_form_voice_endpoint(
+    file: UploadFile = File(...),
+    fields_json: str = Form("[]"),
+    form_title: str = Form(""),
+    target_field_key: str | None = Form(None),
+    current_data_json: str | None = Form(None),
+    identity: dict[str, object] = Depends(current_write_identity),
+) -> dict[str, Any]:
+    """Multi-agent voice-to-form extraction with domain-conditioned Whisper & Critic verification."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="An audio file is required.")
+
+    form_fields = _parse_json_list(fields_json, "fields_json")
+    current_data = _parse_json_dict(current_data_json, "current_data_json")
+
+    suffix = Path(file.filename).suffix or ".webm"
+    temporary_file = NamedTemporaryFile(suffix=suffix, delete=False)
+    temporary_path = Path(temporary_file.name)
+    try:
+        temporary_file.write(await file.read())
+        temporary_file.close()
+        return fill_form_from_voice_multi_agent(
+            audio_path=temporary_path,
+            form_fields=form_fields,
+            form_title=form_title,
+            target_field_key=target_field_key or None,
+            current_data=current_data,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    finally:
+        temporary_path.unlink(missing_ok=True)
+        await file.close()
+
+
+@app.post("/ai/fill-form/document")
+async def ai_fill_form_document_endpoint(
+    files: list[UploadFile] = File(...),
+    fields_json: str = Form("[]"),
+    form_title: str = Form(""),
+    current_data_json: str | None = Form(None),
+    identity: dict[str, object] = Depends(current_write_identity),
+) -> dict[str, Any]:
+    """Multi-agent document-to-form extraction with schema-guided mapping & Critic verification."""
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one document file is required.")
+
+    form_fields = _parse_json_list(fields_json, "fields_json")
+    current_data = _parse_json_dict(current_data_json, "current_data_json")
+
+    temporary_paths: list[Path] = []
+    extracted_documents: list[tuple[str, Path]] = []
+    try:
+        for file in files:
+            if not file.filename:
+                raise HTTPException(status_code=400, detail="Each upload must have a filename.")
+            temporary_file = NamedTemporaryFile(
+                suffix=Path(file.filename).suffix.lower(),
+                delete=False,
+            )
+            temporary_path = Path(temporary_file.name)
+            temporary_paths.append(temporary_path)
+            temporary_file.write(await file.read())
+            temporary_file.close()
+            extracted_documents.append((file.filename, temporary_path))
+
+        return fill_form_from_document_multi_agent(
+            documents=extracted_documents,
+            form_fields=form_fields,
+            form_title=form_title,
+            current_data=current_data,
+        )
+    except (RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=f"Document processing failed: {error}") from error
+    finally:
+        for temporary_path in temporary_paths:
+            temporary_path.unlink(missing_ok=True)
+        for file in files:
+            await file.close()
+
+
+@app.post("/ai/fill-form/text")
+def ai_fill_form_text_endpoint(
+    request: AIFillFormTextRequest,
+    identity: dict[str, object] = Depends(current_write_identity),
+) -> dict[str, Any]:
+    """Multi-agent text-to-form extraction endpoint."""
+    try:
+        return fill_form_multi_agent(
+            raw_text=request.text,
+            form_fields=request.fields,
+            form_title=request.form_title,
+            source_type=request.source_type,
+            target_field_key=request.target_field_key,
+            current_data=request.current_data,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+@app.post("/ai/generate-form/voice")
+async def ai_generate_form_voice_endpoint(
+    file: UploadFile = File(...),
+    existing_fields_json: str | None = Form(None),
+    identity: dict[str, object] = Depends(current_admin),
+) -> dict[str, Any]:
+    """Multi-agent Admin voice-to-form schema generator with SchemaComplianceCritic verification."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="An audio file is required.")
+
+    existing_fields = _parse_json_list(existing_fields_json, "existing_fields_json") if existing_fields_json else None
+
+    suffix = Path(file.filename).suffix or ".webm"
+    temporary_file = NamedTemporaryFile(suffix=suffix, delete=False)
+    temporary_path = Path(temporary_file.name)
+    try:
+        temporary_file.write(await file.read())
+        temporary_file.close()
+        return generate_form_from_voice_multi_agent(
+            audio_path=temporary_path,
+            existing_fields=existing_fields,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    finally:
+        temporary_path.unlink(missing_ok=True)
+        await file.close()
+
+
+@app.post("/ai/generate-form/document")
+async def ai_generate_form_document_endpoint(
+    files: list[UploadFile] = File(...),
+    existing_fields_json: str | None = Form(None),
+    identity: dict[str, object] = Depends(current_admin),
+) -> dict[str, Any]:
+    """Multi-agent Admin document-to-form schema generator with SchemaComplianceCritic verification."""
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one document file is required.")
+
+    existing_fields = _parse_json_list(existing_fields_json, "existing_fields_json") if existing_fields_json else None
+
+    temporary_paths: list[Path] = []
+    extracted_documents: list[tuple[str, Path]] = []
+    try:
+        for file in files:
+            if not file.filename:
+                raise HTTPException(status_code=400, detail="Each upload must have a filename.")
+            temporary_file = NamedTemporaryFile(
+                suffix=Path(file.filename).suffix.lower(),
+                delete=False,
+            )
+            temporary_path = Path(temporary_file.name)
+            temporary_paths.append(temporary_path)
+            temporary_file.write(await file.read())
+            temporary_file.close()
+            extracted_documents.append((file.filename, temporary_path))
+
+        return generate_form_from_document_multi_agent(
+            documents=extracted_documents,
+            existing_fields=existing_fields,
+        )
+    except (RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=f"Document processing failed: {error}") from error
+    finally:
+        for temporary_path in temporary_paths:
+            temporary_path.unlink(missing_ok=True)
+        for file in files:
+            await file.close()
+
+
+@app.post("/ai/generate-form/text")
+def ai_generate_form_text_endpoint(
+    request: AIGenerateFormTextRequest,
+    identity: dict[str, object] = Depends(current_admin),
+) -> dict[str, Any]:
+    """Multi-agent Admin text-to-form schema generator endpoint."""
+    try:
+        return generate_form_schema_multi_agent(
+            raw_text=request.text,
+            source_type=request.source_type,
+            existing_fields=request.existing_fields,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error

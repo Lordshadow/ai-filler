@@ -7,8 +7,6 @@ import { ForgotPassword, ResetPassword } from './PasswordRecovery'
 import UserPanel from './UserPanel'
 import AdminPanel from './AdminPanel'
 import SuperAdminPanel from './SuperAdminPanel'
-import VoicePage from './VoicePage'
-import DocumentsPage from './DocumentsPage'
 import { authFetch } from './api'
 
 function ProtectedRoute({ children, loginPath = '/login', allowedRoles = null }) {
@@ -77,22 +75,8 @@ function App() {
         <Route path="/forgot-password/:role" element={<ForgotPassword />} />
         <Route path="/reset-password/:role" element={<ResetPassword />} />
         <Route path="/signup" element={<Signup />} />
-        <Route
-          path="/voice"
-          element={
-            <ProtectedRoute allowedRoles={['user', 'organization_admin', 'super_admin']} loginPath="/login">
-              <VoicePage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/documents"
-          element={
-            <ProtectedRoute allowedRoles={['user', 'organization_admin', 'super_admin']} loginPath="/login">
-              <DocumentsPage />
-            </ProtectedRoute>
-          }
-        />
+        <Route path="/voice" element={<Navigate to="/user-panel" replace />} />
+        <Route path="/documents" element={<Navigate to="/user-panel" replace />} />
         <Route
           path="/forms"
           element={

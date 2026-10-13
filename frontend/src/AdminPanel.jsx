@@ -88,12 +88,6 @@ export default function AdminPanel() {
           </span>
         </div>
         <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-          <button className="btn-secondary" onClick={() => navigate("/voice")}>
-            🎙️ Voice Filler
-          </button>
-          <button className="btn-secondary" onClick={() => navigate("/documents")}>
-            📄 Documents
-          </button>
           <button className="btn-logout" onClick={handleLogout}>
             Logout
           </button>
