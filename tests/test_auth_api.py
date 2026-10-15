@@ -75,10 +75,6 @@ class TestLoginAPI:
 class TestAuthenticationGuard:
     """Test that endpoints require authentication."""
 
-    def test_transcribe_requires_auth(self):
-        """Transcribe endpoint must require authentication."""
-        response = client.post("/transcribe", data={"file": ("test.webm", b"fake audio")})
-        assert response.status_code == 422 or response.status_code == 401
 
     def test_extract_document_requires_auth(self):
         """Extract document endpoint must require authentication."""
@@ -197,6 +193,47 @@ class TestRoleSessionTransition:
         me_admin = session_client.get("/auth/me")
         assert me_admin.status_code == 200
         assert me_admin.json()["user"]["kind"] == "organization_admin"
+
+    def test_bearer_sessions_keep_roles_isolated_and_logout_only_revokes_current_token(self):
+        """Tab-scoped bearer sessions must win over the shared browser cookie."""
+        from ai_filler.auth.service import create_organization_admin, create_super_admin
+
+        suffix = __import__("secrets").token_hex(4)
+        create_organization_admin(
+            organization_name=f"Tab Isolation {suffix}",
+            full_name="Tab Admin",
+            email=f"tab-admin-{suffix}@example.com",
+            password="AdminPass456!",
+            admin_id=f"ADM-TAB-{suffix.upper()}",
+        )
+        create_super_admin(identifier=f"super-tab-{suffix}", password="SuperPass456!")
+        tab_client = TestClient(app)
+
+        admin_login = tab_client.post("/auth/admin/login", json={
+            "identifier": f"ADM-TAB-{suffix.upper()}", "password": "AdminPass456!",
+        })
+        super_login = tab_client.post("/auth/super/login", json={
+            "identifier": f"super-tab-{suffix}", "password": "SuperPass456!",
+        })
+        assert admin_login.status_code == super_login.status_code == 200
+        admin_token = admin_login.json()["access_token"]
+        super_token = super_login.json()["access_token"]
+
+        admin_me = tab_client.get("/auth/me", headers={"Authorization": f"Bearer {admin_token}"})
+        super_me = tab_client.get("/auth/me", headers={"Authorization": f"Bearer {super_token}"})
+        assert admin_me.json()["user"]["kind"] == "organization_admin"
+        assert super_me.json()["user"]["kind"] == "super_admin"
+
+        logout_response = tab_client.post(
+            "/auth/logout", headers={"Authorization": f"Bearer {admin_token}"}
+        )
+        assert logout_response.status_code == 200
+        assert tab_client.get("/auth/me", headers={
+            "Authorization": f"Bearer {admin_token}"
+        }).status_code == 401
+        assert tab_client.get("/auth/me", headers={
+            "Authorization": f"Bearer {super_token}"
+        }).json()["user"]["kind"] == "super_admin"
 
 
 class TestAdministrativeAuth:

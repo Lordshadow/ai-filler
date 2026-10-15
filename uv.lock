@@ -16,6 +16,7 @@ name = "ai-filler"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "elevenlabs" },
     { name = "fastapi", extra = ["standard"] },
     { name = "groq" },
     { name = "langchain" },
@@ -26,12 +27,14 @@ dependencies = [
     { name = "python-docx" },
     { name = "python-dotenv" },
     { name = "rapidocr-onnxruntime" },
+    { name = "sarvamai" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "elevenlabs", specifier = ">=2.72.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.142.4" },
-    { name = "groq", specifier = "<1" },
+    { name = "groq", specifier = ">=0.37.1" },
     { name = "langchain", specifier = ">=1.4.3" },
     { name = "langchain-groq", specifier = ">=1.1.3" },
     { name = "pillow", specifier = ">=12.3.0" },
@@ -39,7 +42,8 @@ requires-dist = [
     { name = "pypdf", specifier = ">=6.19.0" },
     { name = "python-docx", specifier = ">=1.2.0" },
     { name = "python-dotenv", specifier = ">=1.2.4" },
-    { name = "rapidocr-onnxruntime", specifier = ">=1.4.4" },
+    { name = "rapidocr-onnxruntime", specifier = ">=1.2.0" },
+    { name = "sarvamai", specifier = ">=0.1.37" },
 ]
 
 [[package]]
@@ -332,6 +336,23 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/8c/8b/57666417c0f90f08bcafa776861060426765fdb422eb10212086fb811d26/dnspython-2.8.0.tar.gz", hash = "sha256:181d3c6996452cb1189c4046c61599b84a5a86e099562ffde77d26984ff26d0f", size = 368251, upload-time = "2025-09-07T18:58:00.022Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ba/5a/18ad964b0086c6e62e2e7500f7edc89e3faa45033c71c1893d34eed2b2de/dnspython-2.8.0-py3-none-any.whl", hash = "sha256:01d9bbc4a2d76bf0db7c1f729812ded6d912bd318d3b1cf81d30c0f845dbf3af", size = 331094, upload-time = "2025-09-07T18:57:58.071Z" },
+]
+
+[[package]]
+name = "elevenlabs"
+version = "2.72.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pydantic-core" },
+    { name = "requests" },
+    { name = "typing-extensions" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/01/6f/4735c6127a2115e4fa19c247e9e035501d92488a609c25849bdcbb7e077d/elevenlabs-2.72.0.tar.gz", hash = "sha256:c0021c35be0a08efc9210f1cbec67ea61c6828b5aa9ec141b42ee628bc21ca1b", size = 865890, upload-time = "2026-10-13T08:57:47.71Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/47/a6/985704dc39e0a2427aefb75c24ce695b2d000fbffc71ff7bf69342dd9d45/elevenlabs-2.72.0-py3-none-any.whl", hash = "sha256:878804e08715b6a4146f1406f63add61a065bc75ea9df01bacc8d6f5f2e535e4", size = 2273307, upload-time = "2026-10-13T08:57:45.534Z" },
 ]
 
 [[package]]
@@ -1657,6 +1678,22 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/b9/02/211daf0a7f957386d2223ef7a1601d36b42a6c1a6b93aae32db712868390/rignore-0.8.1-cp315-cp315t-win32.whl", hash = "sha256:e8315151a83b982fe972420372e80c550616095181d1549faaa1ec31f363f5ae", size = 640253, upload-time = "2026-08-04T22:25:50.025Z" },
     { url = "https://files.pythonhosted.org/packages/ca/0e/ccb682455ca380cc640c2a9536390fd907cc5ac0396118643f9d386e4af5/rignore-0.8.1-cp315-cp315t-win_amd64.whl", hash = "sha256:69be37202a052d9e13affed6b774f86d8bf3b417b15d54ad737033e56da07ec0", size = 728332, upload-time = "2026-08-04T22:25:51.937Z" },
     { url = "https://files.pythonhosted.org/packages/eb/ec/a2b634938c39600205dcd37015343e779dc8f112c234d905666dec2a66fd/rignore-0.8.1-cp315-cp315t-win_arm64.whl", hash = "sha256:4268e83bcb88f240ed4f43d73e7de9e4bcd8026bdfcfa836567d6c29863e5361", size = 666611, upload-time = "2026-08-04T22:25:53.857Z" },
+]
+
+[[package]]
+name = "sarvamai"
+version = "0.1.37"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pydantic-core" },
+    { name = "typing-extensions" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/25/95/15484df5b0ffbb4a9ff1433ad1074686451e13147d4eaf489a7c3fb5dbef/sarvamai-0.1.37.tar.gz", hash = "sha256:fc5550422c4fe6f6ef4b7ca568a7efb357c7603c528b83402163575c187f9864", size = 244750, upload-time = "2026-10-12T11:45:45.428Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/84/2b/97cd87f72d2b94bd1cf1df9ffb05b54607a5a27b8ef9b17ccec6412dd77e/sarvamai-0.1.37-py3-none-any.whl", hash = "sha256:c578946d0575c976a57be87474877ba5fdd9a37cba7d0fe3eca87be1c577afab", size = 504685, upload-time = "2026-10-12T11:45:43.651Z" },
 ]
 
 [[package]]

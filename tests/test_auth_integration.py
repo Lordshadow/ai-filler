@@ -147,14 +147,6 @@ class TestAuthenticationFlow:
         assert response2.status_code == 400
         assert "unable" in response2.json()["detail"].lower()
 
-    def test_transcribe_endpoint_requires_auth(self, client):
-        """Test that /transcribe endpoint requires authentication."""
-
-        response = client.post(
-            "/transcribe",
-            files={"file": ("test.wav", b"fake audio data", "audio/wav")},
-        )
-        assert response.status_code == 401
 
     def test_extract_document_endpoint_requires_auth(self, client):
         """Test that /extract-document endpoint requires authentication."""

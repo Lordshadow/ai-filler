@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { Eye, EyeOff, LogIn } from "lucide-react";
 import { authFetch } from "./api";
 import "./Auth.css";
 
@@ -7,7 +8,7 @@ const ROLE_CONFIGS = {
   user: {
     id: "user",
     title: "Applicant Portal",
-    tabLabel: "👤 Applicant",
+    tabLabel: "Applicant",
     label: "Email Address",
     type: "email",
     placeholder: "name@company.com",
@@ -18,7 +19,7 @@ const ROLE_CONFIGS = {
   admin: {
     id: "admin",
     title: "Organization Admin Portal",
-    tabLabel: "🏢 Org Admin",
+    tabLabel: "Organization admin",
     label: "Admin Login ID or Email",
     type: "text",
     placeholder: "e.g. ADM-B44FDBAF9FAF or admin@company.com",
@@ -29,7 +30,7 @@ const ROLE_CONFIGS = {
   super_admin: {
     id: "super_admin",
     title: "Global Governance Console",
-    tabLabel: "🛡️ Root Governance",
+    tabLabel: "Root administrator",
     label: "Root Admin ID or Email",
     type: "text",
     placeholder: "e.g. Shadow or shadow@super-admin.local",
@@ -123,6 +124,10 @@ export default function Login({ role: initialRole = "user" }) {
         setError(data.detail || "Login failed. Check your credentials and try again.");
         return;
       }
+      const data = await response.json();
+      if (data.access_token) {
+        window.sessionStorage.setItem("fillerAiAccessToken", data.access_token);
+      }
       localStorage.setItem("userKind", activeConfig.id);
       navigate(activeConfig.destination);
     } catch {
@@ -135,7 +140,7 @@ export default function Login({ role: initialRole = "user" }) {
   if (checkingSession) {
     return (
       <div className="auth-container">
-        <div className="auth-card" style={{ textAlign: "center", color: "#64748b" }}>
+        <div className="auth-card" style={{ textAlign: "center", color: "var(--text-secondary)" }}>
           <div className="loading">Verifying platform credentials...</div>
         </div>
       </div>
@@ -150,25 +155,26 @@ export default function Login({ role: initialRole = "user" }) {
         {isSuper ? (
           <div className="super-admin-header">
             <div className="super-admin-badge-row">
-              <span className="super-admin-shield">🛡️</span>
               <span className="super-admin-kicker">
                 <span className="beacon-pulse" />
-                ROOT GOVERNANCE GATEWAY
+                SYSTEM ADMINISTRATION
               </span>
             </div>
             <h1 className="super-admin-title">Global Governance Console</h1>
             <p className="super-admin-desc">
-              Privileged Tenant Orchestration &amp; Root Administration
+              Secure access for platform administrators
             </p>
           </div>
         ) : (
           <div style={{ textAlign: "center", marginBottom: "20px" }}>
-            <div style={{ fontSize: "36px", marginBottom: "6px" }}>⚡</div>
-            <h1 style={{ margin: "0 0 6px 0", fontSize: "24px", color: "#1e293b" }}>AI Filler</h1>
-            <p style={{ margin: 0, color: "#64748b", fontSize: "14px" }}>
-              Intelligent Multi-Modal Form &amp; Workflow Engine
+
+            <h1 style={{ margin: "0 0 6px 0", fontSize: "26px", fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", color: "#ffffff" }}>
+              AI FILLER
+            </h1>
+            <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: "14px", fontStyle: "italic" }}>
+              Complete forms with AI and document assistance.
             </p>
-            <h2 style={{ fontSize: "18px", color: "#334155", marginTop: "16px", marginBottom: 0, textAlign: "center" }}>
+            <h2 style={{ fontSize: "17px", color: "#ffffff", marginTop: "16px", marginBottom: 0, textAlign: "center", fontWeight: 700, letterSpacing: "0.02em" }}>
               {activeConfig.title}
             </h2>
           </div>
@@ -195,13 +201,13 @@ export default function Login({ role: initialRole = "user" }) {
           <div className="form-group">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <label htmlFor="password">
-                {isSuper ? "Root Secret Key / Password" : "Password"}
+                {isSuper ? "Administrator password" : "Password"}
               </label>
               <a
                 href={`/forgot-password/${activeConfig.id}`}
                 style={{
                   fontSize: "12px",
-                  color: isSuper ? "#a5b4fc" : "#6366f1",
+                  color: "var(--text-secondary)",
                   textDecoration: "none",
                 }}
               >
@@ -227,7 +233,7 @@ export default function Login({ role: initialRole = "user" }) {
                 title={showPassword ? "Hide password" : "Show password"}
                 tabIndex={-1}
               >
-                {showPassword ? "🙈" : "👁️"}
+                {showPassword ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
               </button>
             </div>
           </div>
@@ -240,26 +246,22 @@ export default function Login({ role: initialRole = "user" }) {
           >
             {loading
               ? isSuper
-                ? "Authenticating Root Credentials…"
+                ? "Signing in…"
                 : "Signing in…"
-              : isSuper
-                ? "Sign In to Governance Console →"
-                : `Sign into ${activeConfig.title}`}
+              : <><LogIn size={16} aria-hidden="true" /> {isSuper ? "Sign in" : `Sign into ${activeConfig.title}`}</>}
           </button>
         </form>
 
         {isSuper && (
           <div className="super-admin-security-notice">
-            <span className="notice-icon">🔒</span>
-            <span>
-              <strong>Root Privileged Zone:</strong> Access is restricted to authorized global system administrators. All authentication events, session tokens, and tenant governance actions are cryptographically audited.
-            </span>
+
+            <span>Access is restricted to authorized platform administrators.</span>
           </div>
         )}
 
         {isSuper ? (
           <p className="super-admin-backlink">
-            <a href="/login">← Return to Applicant &amp; Org Admin Portal</a>
+            <a href="/login">← Return to the sign-in page</a>
           </p>
         ) : (
           <>
@@ -270,7 +272,7 @@ export default function Login({ role: initialRole = "user" }) {
             )}
 
             {selectedRole === "admin" && (
-              <p className="auth-link" style={{ fontSize: "12px", color: "#94a3b8" }}>
+              <p className="auth-link" style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
                 Organization Admin IDs (e.g. <code>ADM-XXXXXX</code>) are generated by your Super Admin.
               </p>
             )}

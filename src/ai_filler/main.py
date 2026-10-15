@@ -3,10 +3,11 @@ import json
 import os
 import re
 import secrets
+import time
 from tempfile import NamedTemporaryFile
 from typing import Any
 
-from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Response, UploadFile, status
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi import Cookie, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -14,13 +15,21 @@ from pydantic import BaseModel
 
 from .agents.form_agents import (
     fill_form_from_document_multi_agent,
-    fill_form_from_voice_multi_agent,
     fill_form_multi_agent,
     generate_form_from_document_multi_agent,
-    generate_form_from_voice_multi_agent,
     generate_form_schema_multi_agent,
 )
-from .services.main import create_application, process_documents, transcribe_audio
+from .logging_utils import log_structured_event, reset_correlation_id, set_correlation_id
+from .groq_client import (
+    ORPHEUS_MAX_INPUT_CHARS,
+    build_voice_transcription_keyterms,
+    build_voice_transcription_prompt,
+    normalize_elevenlabs_language,
+    normalize_sarvam_language,
+    synthesize_english_speech,
+    transcribe_audio,
+)
+from .services.main import process_documents
 from .auth.dependencies import (
     current_admin,
     current_identity,
@@ -59,6 +68,10 @@ from .services.submissions import (
     submit_application,
     update_application_status,
 )
+
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+DOCUMENT_UPLOAD_EXTENSIONS = {".pdf", ".docx", ".txt", ".png", ".jpg", ".jpeg", ".webp"}
+AUDIO_UPLOAD_EXTENSIONS = {".webm", ".wav", ".mp3", ".m4a", ".mp4", ".mpeg", ".mpga", ".ogg", ".flac"}
 from .test import test_function
 
 app = FastAPI(title="AI Filler")
@@ -71,12 +84,45 @@ app.add_middleware(
     allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$",
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["X-Correlation-ID", "ETag"],
     allow_credentials=True,
 )
 
 
-class ApplicationFormatRequest(BaseModel):
-    transcript: str
+@app.middleware("http")
+async def correlation_and_logging_middleware(request: Request, call_next) -> Response:
+    """Bind X-Correlation-ID to async contextvars, echo header, and emit structured HTTP telemetry."""
+    incoming_corr_id = request.headers.get("X-Correlation-ID")
+    corr_id, token = set_correlation_id(incoming_corr_id)
+    start_ts = time.perf_counter()
+    try:
+        response: Response = await call_next(request)
+        elapsed_ms = (time.perf_counter() - start_ts) * 1000.0
+        response.headers["X-Correlation-ID"] = corr_id
+        log_structured_event(
+            "http_request_completed",
+            component="api",
+            duration_ms=elapsed_ms,
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+        )
+        return response
+    except Exception as exc:
+        elapsed_ms = (time.perf_counter() - start_ts) * 1000.0
+        log_structured_event(
+            "http_request_failed",
+            level="ERROR",
+            component="api",
+            duration_ms=elapsed_ms,
+            method=request.method,
+            path=request.url.path,
+            error=str(exc),
+        )
+        raise
+    finally:
+        reset_correlation_id(token)
+
 
 
 class SignupRequest(BaseModel):
@@ -180,7 +226,7 @@ def user_login(request: LoginRequest, response: Response) -> dict[str, object]:
     try:
         result = login(identifier=request.identifier, password=request.password, kind="user")
         _set_session(response, result)
-        return {"user": result["user"]}
+        return {"user": result["user"], "access_token": result["token"]}
     except PermissionError as error:
         raise HTTPException(status_code=401, detail=str(error)) from error
 
@@ -194,7 +240,7 @@ def admin_login(request: LoginRequest, response: Response) -> dict[str, object]:
             kind="organization_admin",
         )
         _set_session(response, result)
-        return {"user": result["user"]}
+        return {"user": result["user"], "access_token": result["token"]}
     except PermissionError as error:
         raise HTTPException(status_code=401, detail=str(error)) from error
 
@@ -204,7 +250,7 @@ def super_admin_login(request: LoginRequest, response: Response) -> dict[str, ob
     try:
         result = login(identifier=request.identifier, password=request.password, kind="super_admin")
         _set_session(response, result)
-        return {"user": result["user"]}
+        return {"user": result["user"], "access_token": result["token"]}
     except PermissionError as error:
         raise HTTPException(status_code=401, detail=str(error)) from error
 
@@ -374,8 +420,11 @@ def auth_me(identity: dict[str, object] = Depends(current_identity)) -> dict[str
 def auth_logout(
     response: Response,
     token: str | None = Cookie(default=None, alias="session_token"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
     identity: dict[str, object] = Depends(current_write_identity),
 ) -> dict[str, str]:
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
     logout(token)
     response.delete_cookie("session_token")
     response.delete_cookie("csrf_token")
@@ -384,41 +433,6 @@ def auth_logout(
 @app.get("/test")
 def test_endpoint():
     return test_function()
-
-
-@app.post("/transcribe")
-async def transcribe_endpoint(
-    file: UploadFile = File(...),
-    identity: dict[str, object] = Depends(current_write_identity),
-) -> dict[str, str]:
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="An audio file is required.")
-
-    suffix = Path(file.filename).suffix or ".webm"
-    temporary_file = NamedTemporaryFile(suffix=suffix, delete=False)
-    temporary_path = Path(temporary_file.name)
-    try:
-        temporary_file.write(await file.read())
-        temporary_file.close()
-        return {"text": transcribe_audio(file_path=temporary_path)}
-    except RuntimeError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
-    finally:
-        temporary_path.unlink(missing_ok=True)
-        await file.close()
-
-
-@app.post("/format-application")
-def format_application_endpoint(
-    request: ApplicationFormatRequest,
-    identity: dict[str, object] = Depends(current_write_identity),
-) -> dict[str, dict[str, str]]:
-    try:
-        return {"application": create_application(transcript=request.transcript)}
-    except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    except RuntimeError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
 
 
 @app.post("/extract-document")
@@ -601,6 +615,10 @@ class FormCreateRequest(BaseModel):
     fields: list[dict[str, Any]]
     organization_id: int | None = None
     publish: bool = True
+    enable_voice: bool = True
+    enable_doc_upload: bool = True
+    enableVoice: bool | None = None
+    enableDocUpload: bool | None = None
 
 
 class FormCustomizeRequest(BaseModel):
@@ -608,6 +626,10 @@ class FormCustomizeRequest(BaseModel):
     description: str | None = None
     fields: list[dict[str, Any]] | None = None
     publish: bool = True
+    enable_voice: bool | None = None
+    enable_doc_upload: bool | None = None
+    enableVoice: bool | None = None
+    enableDocUpload: bool | None = None
 
 
 @app.post("/forms", status_code=201)
@@ -620,6 +642,9 @@ def create_form_endpoint(
     if identity.get("kind") != "super_admin":
         org_id = identity.get("organization_id")
 
+    v_voice = request.enableVoice if request.enableVoice is not None else request.enable_voice
+    v_doc = request.enableDocUpload if request.enableDocUpload is not None else request.enable_doc_upload
+
     try:
         created = create_form(
             form_id=request.form_id,
@@ -629,6 +654,8 @@ def create_form_endpoint(
             created_by=int(identity["id"]),
             organization_id=org_id,
             publish=request.publish,
+            enable_voice=v_voice,
+            enable_doc_upload=v_doc,
         )
         return {"form": created}
     except ValueError as error:
@@ -663,6 +690,9 @@ def customize_form_endpoint(
     identity: dict[str, object] = Depends(current_admin),
 ) -> dict[str, Any]:
     """Admin customizes existing form definition, fields, regex, and bumps version."""
+    v_voice = request.enableVoice if request.enableVoice is not None else request.enable_voice
+    v_doc = request.enableDocUpload if request.enableDocUpload is not None else request.enable_doc_upload
+
     try:
         updated = customize_form(
             form_id=form_id,
@@ -671,6 +701,8 @@ def customize_form_endpoint(
             description=request.description,
             fields=request.fields,
             publish=request.publish,
+            enable_voice=v_voice,
+            enable_doc_upload=v_doc,
         )
         return {"form": updated}
     except PermissionError as error:
@@ -902,13 +934,13 @@ class AIFillFormTextRequest(BaseModel):
     form_title: str = ""
     target_field_key: str | None = None
     current_data: dict[str, Any] | None = None
-    source_type: str = "AI_VOICE"
+    source_type: str = "AI_TEXT"
 
 
 class AIGenerateFormTextRequest(BaseModel):
     text: str
     existing_fields: list[dict[str, Any]] | None = None
-    source_type: str = "AI_VOICE"
+    source_type: str = "AI_TEXT"
 
 
 def _parse_json_list(raw: str | None, field_name: str) -> list[dict[str, Any]]:
@@ -935,41 +967,153 @@ def _parse_json_dict(raw: str | None, field_name: str) -> dict[str, Any] | None:
         raise HTTPException(status_code=400, detail=f"Invalid {field_name}: {exc}") from exc
 
 
-@app.post("/ai/fill-form/voice")
-async def ai_fill_form_voice_endpoint(
-    file: UploadFile = File(...),
-    fields_json: str = Form("[]"),
-    form_title: str = Form(""),
-    target_field_key: str | None = Form(None),
-    current_data_json: str | None = Form(None),
-    identity: dict[str, object] = Depends(current_write_identity),
-) -> dict[str, Any]:
-    """Multi-agent voice-to-form extraction with domain-conditioned Whisper & Critic verification."""
+async def _save_document_upload_to_temp(file: UploadFile) -> Path:
+    """Validate and save one document upload to a temporary file."""
     if not file.filename:
-        raise HTTPException(status_code=400, detail="An audio file is required.")
+        raise HTTPException(status_code=400, detail="Each upload must have a filename.")
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in DOCUMENT_UPLOAD_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="Unsupported file type.")
 
-    form_fields = _parse_json_list(fields_json, "fields_json")
-    current_data = _parse_json_dict(current_data_json, "current_data_json")
-
-    suffix = Path(file.filename).suffix or ".webm"
     temporary_file = NamedTemporaryFile(suffix=suffix, delete=False)
     temporary_path = Path(temporary_file.name)
+    total_bytes = 0
     try:
-        temporary_file.write(await file.read())
+        while chunk := await file.read(1024 * 1024):
+            total_bytes += len(chunk)
+            if total_bytes > MAX_UPLOAD_BYTES:
+                raise HTTPException(status_code=413, detail="Uploaded file exceeds the 20 MB limit.")
+            temporary_file.write(chunk)
         temporary_file.close()
-        return fill_form_from_voice_multi_agent(
-            audio_path=temporary_path,
-            form_fields=form_fields,
-            form_title=form_title,
-            target_field_key=target_field_key or None,
-            current_data=current_data,
-        )
-    except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    except RuntimeError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
-    finally:
+        if total_bytes == 0:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+        return temporary_path
+    except Exception:
+        temporary_file.close()
         temporary_path.unlink(missing_ok=True)
+        raise
+
+
+def _audio_signature_matches(path: Path, suffix: str) -> bool:
+    with path.open("rb") as audio_file:
+        header = audio_file.read(16)
+    if suffix == ".webm":
+        return header.startswith(b"\x1aE\xdf\xa3")
+    if suffix == ".wav":
+        return header.startswith(b"RIFF") and header[8:12] == b"WAVE"
+    if suffix in {".m4a", ".mp4"}:
+        return header[4:8] == b"ftyp"
+    if suffix == ".ogg":
+        return header.startswith(b"OggS")
+    if suffix == ".flac":
+        return header.startswith(b"fLaC")
+    if suffix in {".mp3", ".mpeg", ".mpga"}:
+        return header.startswith(b"ID3") or (len(header) > 1 and header[0] == 0xFF and header[1] & 0xE0 == 0xE0)
+    return False
+
+
+async def _save_voice_upload_to_temp(file: UploadFile) -> Path:
+    """Stream a bounded, signature-checked browser audio recording to disk."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="A voice recording is required.")
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in AUDIO_UPLOAD_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="This audio format is not supported.")
+
+    temporary_file = NamedTemporaryFile(suffix=suffix, delete=False)
+    temporary_path = Path(temporary_file.name)
+    total_bytes = 0
+    try:
+        while chunk := await file.read(64 * 1024):
+            total_bytes += len(chunk)
+            if total_bytes > MAX_UPLOAD_BYTES:
+                raise HTTPException(status_code=413, detail="Voice recording exceeds the 20 MB limit.")
+            temporary_file.write(chunk)
+        temporary_file.close()
+        if total_bytes == 0:
+            raise HTTPException(status_code=400, detail="Voice recording is empty.")
+        if not _audio_signature_matches(temporary_path, suffix):
+            raise HTTPException(status_code=415, detail="The uploaded file is not a supported audio recording.")
+        return temporary_path
+    except Exception:
+        temporary_file.close()
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+
+class AIVoiceSpeakRequest(BaseModel):
+    text: str
+    voice: str = "alice"
+
+
+@app.post("/ai/voice/speak")
+def ai_voice_speak_endpoint(
+    request: AIVoiceSpeakRequest,
+    identity: dict[str, object] = Depends(current_write_identity),
+) -> Response:
+    """Generate high-fidelity speech prompt using ElevenLabs Multilingual TTS."""
+    if len(request.text.strip()) > ORPHEUS_MAX_INPUT_CHARS:
+        raise HTTPException(status_code=422, detail="Speech text is too long.")
+    try:
+        audio = synthesize_english_speech(text=request.text.strip(), voice=request.voice)
+        is_mp3 = audio.startswith(b"\xff\xfb") or audio.startswith(b"ID3") or not audio.startswith(b"RIFF")
+        media_type = "audio/mpeg" if is_mp3 else "audio/wav"
+        return Response(content=audio, media_type=media_type, headers={"Cache-Control": "no-store"})
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail="Speech request is invalid.") from error
+    except Exception as error:
+        log_structured_event("voice_synthesis_unavailable", level="WARNING", component="voice", error_type=type(error).__name__, error_message=str(error))
+        raise HTTPException(status_code=503, detail="Voice playback is temporarily unavailable.") from error
+
+
+@app.post("/ai/voice/transcribe")
+async def ai_voice_transcribe_endpoint(
+    file: UploadFile = File(...),
+    language: str = Form("auto"),
+    form_title: str = Form(""),
+    field_label: str = Form(""),
+    options_json: str = Form("[]"),
+    identity: dict[str, object] = Depends(current_write_identity),
+) -> dict[str, str]:
+    """Transcribe a short voice answer for browsers without SpeechRecognition."""
+    try:
+        options = json.loads(options_json or "[]")
+        if not isinstance(options, list) or not all(isinstance(option, str) for option in options):
+            raise ValueError("options_json must contain a string list.")
+    except (TypeError, json.JSONDecodeError, ValueError) as error:
+        raise HTTPException(status_code=400, detail="Invalid voice answer options.") from error
+
+    temporary_path: Path | None = None
+    try:
+        temporary_path = await _save_voice_upload_to_temp(file)
+        normalized_language = normalize_sarvam_language(language)
+        keyterms = build_voice_transcription_keyterms(
+            form_title=form_title[:120],
+            field_label=field_label[:120],
+            options=options[:20],
+        )
+        prompt = build_voice_transcription_prompt(
+            form_title=form_title[:120],
+            field_label=field_label[:120],
+            options=options[:20],
+        )
+        transcript = transcribe_audio(
+            file_path=str(temporary_path),
+            language=normalized_language,
+            prompt=prompt,
+            keyterms=keyterms,
+        )
+        if not transcript.strip():
+            raise HTTPException(status_code=422, detail="I couldn't hear a clear answer. Please try again.")
+        return {"text": transcript}
+    except HTTPException:
+        raise
+    except Exception as error:
+        log_structured_event("voice_transcription_unavailable", level="WARNING", component="voice", error_type=type(error).__name__, error_message=str(error))
+        raise HTTPException(status_code=503, detail="Voice transcription is temporarily unavailable.") from error
+    finally:
+        if temporary_path:
+            temporary_path.unlink(missing_ok=True)
         await file.close()
 
 
@@ -994,14 +1138,8 @@ async def ai_fill_form_document_endpoint(
         for file in files:
             if not file.filename:
                 raise HTTPException(status_code=400, detail="Each upload must have a filename.")
-            temporary_file = NamedTemporaryFile(
-                suffix=Path(file.filename).suffix.lower(),
-                delete=False,
-            )
-            temporary_path = Path(temporary_file.name)
+            temporary_path = await _save_document_upload_to_temp(file)
             temporary_paths.append(temporary_path)
-            temporary_file.write(await file.read())
-            temporary_file.close()
             extracted_documents.append((file.filename, temporary_path))
 
         return fill_form_from_document_multi_agent(
@@ -1012,8 +1150,10 @@ async def ai_fill_form_document_endpoint(
         )
     except (RuntimeError, ValueError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    except HTTPException:
+        raise
     except Exception as error:
-        raise HTTPException(status_code=502, detail=f"Document processing failed: {error}") from error
+        raise HTTPException(status_code=502, detail="Document processing failed.") from error
     finally:
         for temporary_path in temporary_paths:
             temporary_path.unlink(missing_ok=True)
@@ -1040,37 +1180,6 @@ def ai_fill_form_text_endpoint(
         raise HTTPException(status_code=422, detail=str(error)) from error
     except RuntimeError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
-
-
-@app.post("/ai/generate-form/voice")
-async def ai_generate_form_voice_endpoint(
-    file: UploadFile = File(...),
-    existing_fields_json: str | None = Form(None),
-    identity: dict[str, object] = Depends(current_admin),
-) -> dict[str, Any]:
-    """Multi-agent Admin voice-to-form schema generator with SchemaComplianceCritic verification."""
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="An audio file is required.")
-
-    existing_fields = _parse_json_list(existing_fields_json, "existing_fields_json") if existing_fields_json else None
-
-    suffix = Path(file.filename).suffix or ".webm"
-    temporary_file = NamedTemporaryFile(suffix=suffix, delete=False)
-    temporary_path = Path(temporary_file.name)
-    try:
-        temporary_file.write(await file.read())
-        temporary_file.close()
-        return generate_form_from_voice_multi_agent(
-            audio_path=temporary_path,
-            existing_fields=existing_fields,
-        )
-    except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    except RuntimeError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
-    finally:
-        temporary_path.unlink(missing_ok=True)
-        await file.close()
 
 
 @app.post("/ai/generate-form/document")

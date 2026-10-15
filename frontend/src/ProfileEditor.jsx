@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Building2, CheckCircle2, RotateCcw, Save, Shield, UserRound } from "lucide-react";
 import { authFetch } from "./api";
 import "./Auth.css";
 
@@ -237,20 +238,20 @@ export default function ProfileEditor({ user, onProfileUpdated, role = "user" })
           <div className="profile-hero-chips">
             {user?.admin_id && (
               <span className="profile-chip">
-                🔑 ID: <strong>{user.admin_id}</strong>
+                ID: <strong>{user.admin_id}</strong>
               </span>
             )}
             {user?.organization_name && (
               <span className="profile-chip">
-                🏢 Org: <strong>{user.organization_name}</strong>
+                Organization: <strong>{user.organization_name}</strong>
               </span>
             )}
             {user?.created_at && (
               <span className="profile-chip">
-                📅 Member since {new Date(user.created_at).toLocaleDateString()}
+                Member since {new Date(user.created_at).toLocaleDateString()}
               </span>
             )}
-            <span className="profile-chip chip-status">● Active Account</span>
+            <span className="profile-chip chip-status"><CheckCircle2 size={14} aria-hidden="true" /> Active</span>
           </div>
         </div>
       </div>
@@ -258,7 +259,7 @@ export default function ProfileEditor({ user, onProfileUpdated, role = "user" })
       {/* Toast Alert Banners */}
       {successMsg && (
         <div className="profile-toast toast-success" role="alert">
-          <span>✅ {successMsg}</span>
+          <span> {successMsg}</span>
           <button className="toast-close" onClick={() => setSuccessMsg("")}>
             ×
           </button>
@@ -267,7 +268,7 @@ export default function ProfileEditor({ user, onProfileUpdated, role = "user" })
 
       {errorMsg && (
         <div className="profile-toast toast-error" role="alert">
-          <span>⚠️ {errorMsg}</span>
+          <span> {errorMsg}</span>
           <button className="toast-close" onClick={() => setErrorMsg("")}>
             ×
           </button>
@@ -284,7 +285,7 @@ export default function ProfileEditor({ user, onProfileUpdated, role = "user" })
             setErrorMsg("");
           }}
         >
-          👤 Personal Information
+          <UserRound size={16} aria-hidden="true" /> Personal information
         </button>
         <button
           type="button"
@@ -294,7 +295,7 @@ export default function ProfileEditor({ user, onProfileUpdated, role = "user" })
             setErrorMsg("");
           }}
         >
-          🔒 Security & Password
+          <Shield size={16} aria-hidden="true" /> Security & Password
         </button>
         <button
           type="button"
@@ -304,7 +305,7 @@ export default function ProfileEditor({ user, onProfileUpdated, role = "user" })
             setErrorMsg("");
           }}
         >
-          🏢 Organization & System
+          <Building2 size={16} aria-hidden="true" /> Organization & System
         </button>
       </div>
 
@@ -312,13 +313,13 @@ export default function ProfileEditor({ user, onProfileUpdated, role = "user" })
       {activeTab === "personal" && (
         <form className="profile-form-section" onSubmit={handleSavePersonal}>
           <div className="section-intro">
-            <h3>Profile & Contact Details</h3>
-            <p>Update your personal information and verified contact details.</p>
+            <h3>Personal details</h3>
+            <p>Manage your contact information.</p>
           </div>
 
           {isPersonalDirty && (
             <div className="profile-unsaved-banner">
-              <span>⚠️ You have unsaved changes to your profile information.</span>
+              <span> You have unsaved changes to your profile information.</span>
               <div style={{ display: "flex", gap: "8px" }}>
                 <button
                   type="button"
@@ -352,7 +353,7 @@ export default function ProfileEditor({ user, onProfileUpdated, role = "user" })
                 placeholder="e.g. Dr. Jane Doe"
                 required
               />
-              <span className="field-hint">Your primary identity as shown on submitted applications and audit logs.</span>
+              <span className="field-hint">Shown on your applications.</span>
             </div>
 
             <div className="form-group">
@@ -369,7 +370,7 @@ export default function ProfileEditor({ user, onProfileUpdated, role = "user" })
                 title="Must be a valid email containing '@' and a domain"
                 required
               />
-              <span className="field-hint">Used for portal authentication and notifications. Must contain '@'.</span>
+              <span className="field-hint">Used for account access and updates.</span>
             </div>
 
             <div className="form-group">
@@ -385,7 +386,7 @@ export default function ProfileEditor({ user, onProfileUpdated, role = "user" })
                 pattern="^\+[1-9]\d{1,14}$"
                 title="International E.164 format starting with '+' (e.g. +14155552671)"
               />
-              <span className="field-hint">Include country code with '+' prefix (e.g. +14155552671).</span>
+              <span className="field-hint">Include your country code.</span>
             </div>
 
             {role === "user" && (
@@ -399,7 +400,7 @@ export default function ProfileEditor({ user, onProfileUpdated, role = "user" })
                   value={personalForm.date_of_birth}
                   onChange={(e) => setPersonalForm({ ...personalForm, date_of_birth: e.target.value })}
                 />
-                <span className="field-hint">Required for eligibility verification on official forms.</span>
+                <span className="field-hint">Used for eligibility checks.</span>
               </div>
             )}
           </div>
@@ -410,7 +411,7 @@ export default function ProfileEditor({ user, onProfileUpdated, role = "user" })
               className="btn-primary"
               disabled={savingPersonal || !isPersonalDirty}
             >
-              {savingPersonal ? "Saving Profile…" : "Save Profile Details"}
+              <Save size={16} aria-hidden="true" /> {savingPersonal ? "Saving" : "Save changes"}
             </button>
             <button
               type="button"
@@ -418,7 +419,7 @@ export default function ProfileEditor({ user, onProfileUpdated, role = "user" })
               onClick={handleDiscardPersonal}
               disabled={savingPersonal || !isPersonalDirty}
             >
-              Discard Changes
+              <RotateCcw size={15} aria-hidden="true" /> Discard
             </button>
           </div>
         </form>
@@ -452,7 +453,7 @@ export default function ProfileEditor({ user, onProfileUpdated, role = "user" })
                   onClick={() => setShowCurrentPassword(!showCurrentPassword)}
                   aria-label="Toggle password visibility"
                 >
-                  {showCurrentPassword ? "🙈 Hide" : "👁️ Show"}
+                  {showCurrentPassword ? " Hide" : " Show"}
                 </button>
               </div>
             </div>
@@ -476,7 +477,7 @@ export default function ProfileEditor({ user, onProfileUpdated, role = "user" })
                   onClick={() => setShowNewPassword(!showNewPassword)}
                   aria-label="Toggle password visibility"
                 >
-                  {showNewPassword ? "🙈 Hide" : "👁️ Show"}
+                  {showNewPassword ? " Hide" : " Show"}
                 </button>
               </div>
             </div>
@@ -519,7 +520,7 @@ export default function ProfileEditor({ user, onProfileUpdated, role = "user" })
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                   aria-label="Toggle password visibility"
                 >
-                  {showConfirmPassword ? "🙈 Hide" : "👁️ Show"}
+                  {showConfirmPassword ? " Hide" : " Show"}
                 </button>
               </div>
               {passwordForm.confirm_password && (
@@ -558,7 +559,7 @@ export default function ProfileEditor({ user, onProfileUpdated, role = "user" })
             <>
               {isOrgDirty && (
                 <div className="profile-unsaved-banner">
-                  <span>⚠️ Unsaved organization changes.</span>
+                  <span> Unsaved organization changes.</span>
                   <button type="submit" className="btn-primary-small" disabled={savingOrg}>
                     {savingOrg ? "Saving…" : "Save Organization"}
                   </button>
@@ -622,7 +623,7 @@ export default function ProfileEditor({ user, onProfileUpdated, role = "user" })
             <>
               {isOrgDirty && (
                 <div className="profile-unsaved-banner">
-                  <span>⚠️ Unsaved super-admin settings.</span>
+                  <span> Unsaved super-admin settings.</span>
                   <button type="submit" className="btn-primary-small" disabled={savingOrg}>
                     {savingOrg ? "Saving…" : "Save Settings"}
                   </button>

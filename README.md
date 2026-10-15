@@ -1,6 +1,6 @@
 # AI Filler
 
-AI Filler is an enterprise-grade platform for intelligent, multi-modal form automation and dynamic workflow orchestration. It combines speech-to-text (Groq Whisper), OCR and document ingestion (RapidOCR + LangChain), dynamic admin-customizable forms, autosave drafts with field-level provenance tracking, and server-side contract validation across three user tiers: **Super Admin**, **Organization Admin**, and **End User**.
+AI Filler is an enterprise-grade platform for intelligent, multi-modal form automation and dynamic workflow orchestration. It combines OCR and document ingestion (RapidOCR + LangChain), dynamic admin-customizable forms, autosave drafts with field-level provenance tracking, and server-side contract validation across three user tiers: **Super Admin**, **Organization Admin**, and **End User**.
 
 ---
 
@@ -11,7 +11,7 @@ Follow these steps to set up and run both the Backend API and Frontend applicati
 ### 1. Prerequisites
 - **Python**: Version 3.14+ (the pre-configured `.venv` virtual environment in the repository includes all dependencies)
 - **Node.js**: Version 20+ with `npm`
-- **Groq API Key**: Obtainable from [console.groq.com](https://console.groq.com/) for Whisper audio transcription and LLM application formatting.
+- **Groq API Key**: Obtainable from [console.groq.com](https://console.groq.com/) for LLM form assistance.
 
 ---
 
@@ -120,7 +120,7 @@ The platform features dedicated, isolated authentication portals for each user t
 - `GET /forms/{id}`: Fetches form definition and compiled schema (supports optional `?version={n}`).
 
 ### 3. Draft Service (`DraftService`)
-- `PUT /drafts/{id}`: Autosaves state with field-level origin provenance (`voice`, `doc`, `user`) and Optimistic Concurrency Control (OCC) using `If-Match` ETags (`W/"v{version}"`). Returns `409 Conflict` on race conditions.
+- `PUT /drafts/{id}`: Autosaves state with field-level origin provenance (`AI`, `document`, `manual`) and Optimistic Concurrency Control (OCC) using `If-Match` ETags (`W/"v{version}"`). Returns `409 Conflict` on race conditions.
 - `GET /drafts/{id}`: Resumes draft with ETag and provenance intact.
 
 ### 4. Submission Service (`SubmissionService`)

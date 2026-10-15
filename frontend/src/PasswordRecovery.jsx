@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import { ArrowLeft, KeyRound, Send } from "lucide-react";
 import { apiUrl } from "./api";
 import "./Auth.css";
 
@@ -51,9 +52,9 @@ export function ForgotPassword() {
             <label htmlFor="identifier">{settings.label[0].toUpperCase() + settings.label.slice(1)}</label>
             <input id="identifier" type={role === "user" ? "email" : "text"} autoComplete="username" value={identifier} onChange={(event) => setIdentifier(event.target.value)} required disabled={loading} />
           </div>
-          <button className="btn-primary" type="submit" disabled={loading}>{loading ? "Sending…" : "Send reset instructions"}</button>
+          <button className="btn-primary" type="submit" disabled={loading}>{loading ? "Sending…" : <><Send size={16} aria-hidden="true" /> Send reset instructions</>}</button>
         </form>
-        <p className="auth-link"><Link to={settings.loginPath}>Back to sign in</Link></p>
+        <p className="auth-link"><Link to={settings.loginPath}><ArrowLeft size={15} aria-hidden="true" /> Back to sign in</Link></p>
       </div>
     </div>
   );
@@ -115,7 +116,7 @@ export function ResetPassword() {
             <label htmlFor="confirm-password">Confirm new password</label>
             <input id="confirm-password" type="password" autoComplete="new-password" minLength={8} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required disabled={loading} />
           </div>
-          <button className="btn-primary" type="submit" disabled={loading}>{loading ? "Updating…" : "Update password"}</button>
+          <button className="btn-primary" type="submit" disabled={loading}>{loading ? "Updating…" : <><KeyRound size={16} aria-hidden="true" /> Update password</>}</button>
         </form>}
       </div>
     </div>

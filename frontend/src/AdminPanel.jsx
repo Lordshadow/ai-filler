@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { FileText, Inbox, LogOut, Settings, Users } from "lucide-react";
 import { authFetch } from "./api";
 import "./Auth.css";
 import FormBuilder from "./FormBuilder";
@@ -60,6 +61,7 @@ export default function AdminPanel() {
         method: "POST",
       });
       if (response.ok) {
+        window.sessionStorage.removeItem("fillerAiAccessToken");
         localStorage.removeItem("userKind");
         navigate("/admin/login");
       } else {
@@ -83,13 +85,13 @@ export default function AdminPanel() {
       <div className="panel-header">
         <div>
           <h1>Organization Admin Portal</h1>
-          <span style={{ color: "#64748b", fontSize: "14px" }}>
+          <span style={{ color: "var(--text-secondary)", fontSize: "14px" }}>
             Workspace: <strong>{admin?.full_name}</strong> (ID: {admin?.admin_id})
           </span>
         </div>
         <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
           <button className="btn-logout" onClick={handleLogout}>
-            Logout
+            <LogOut size={16} aria-hidden="true" /> Log out
           </button>
         </div>
       </div>
@@ -100,36 +102,36 @@ export default function AdminPanel() {
           className={`tab ${activeTab === "submissions" ? "active" : ""}`}
           onClick={() => setActiveTab("submissions")}
         >
-          📥 Filled Forms & Submissions
+          <Inbox size={16} aria-hidden="true" /> Submissions
         </button>
         <button
           className={`tab ${activeTab === "forms" ? "active" : ""}`}
           onClick={() => setActiveTab("forms")}
         >
-          📋 Dynamic Form Builder
+          <FileText size={16} aria-hidden="true" /> Forms
         </button>
         <button
           className={`tab ${activeTab === "users" ? "active" : ""}`}
           onClick={() => setActiveTab("users")}
         >
-          👥 User Directory & Onboarding
+          <Users size={16} aria-hidden="true" /> Users
         </button>
         <button
           className={`tab ${activeTab === "settings" ? "active" : ""}`}
           onClick={() => setActiveTab("settings")}
         >
-          ⚙️ Admin & Organization Profile
+          <Settings size={16} aria-hidden="true" /> Settings
         </button>
       </div>
 
-      {/* Tab: Filled Forms & Submissions */}
+      {/* Tab:Submissions */}
       {activeTab === "submissions" && (
         <div className="panel-section">
           <SubmissionsManager />
         </div>
       )}
 
-      {/* Tab 1: Dynamic Form Builder */}
+      {/* Tab 1:Forms */}
       {activeTab === "forms" && (
         <div className="panel-section">
           <FormBuilder adminRole="organization_admin" />
@@ -142,7 +144,7 @@ export default function AdminPanel() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
             <div>
               <h3>Organization User Management</h3>
-              <p style={{ margin: 0, color: "#64748b", fontSize: "14px" }}>
+              <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: "14px" }}>
                 Provision applicant accounts under your organization.
               </p>
             </div>
@@ -154,12 +156,11 @@ export default function AdminPanel() {
             </button>
           </div>
 
-          {userCreatedMsg && <div className="info-card" style={{ marginBottom: "16px", color: "#15803d" }}>{userCreatedMsg}</div>}
+          {userCreatedMsg && <div className="info-card" style={{ marginBottom: "16px" }}>{userCreatedMsg}</div>}
 
           {showCreateUser && (
             <form
               className="create-user-form"
-              style={{ background: "#f8fafc", padding: "20px", borderRadius: "8px", border: "1px solid #e2e8f0", marginBottom: "20px" }}
               onSubmit={async (e) => {
                 e.preventDefault();
                 setUserCreatedMsg("");
@@ -246,7 +247,7 @@ export default function AdminPanel() {
         </div>
       )}
 
-      {/* Tab: Admin & Organization Profile */}
+      {/* Tab:Settings */}
       {activeTab === "settings" && (
         <div style={{ marginTop: "12px" }}>
           <ProfileEditor

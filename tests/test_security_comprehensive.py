@@ -887,19 +887,7 @@ class TestErrorDisclosure:
 class TestProtectedEndpoints:
     """All service endpoints must require authentication."""
 
-    def test_transcribe_no_auth(self):
-        resp = client.post(
-            "/transcribe",
-            files={"file": ("test.wav", b"fake audio data", "audio/wav")},
-        )
-        assert resp.status_code == 401
 
-    def test_format_application_no_auth(self):
-        resp = client.post(
-            "/format-application",
-            json={"transcript": "hello world"},
-        )
-        assert resp.status_code == 401
 
     def test_extract_document_no_auth(self):
         resp = client.post(
@@ -922,18 +910,6 @@ class TestProtectedEndpoints:
         # These all use current_write_identity which requires CSRF
         resp_logout = client.post("/auth/logout")
         assert resp_logout.status_code == 403
-
-        resp_transcribe = client.post(
-            "/transcribe",
-            files={"file": ("a.wav", b"data", "audio/wav")},
-        )
-        assert resp_transcribe.status_code == 403
-
-        resp_format = client.post(
-            "/format-application",
-            json={"transcript": "test"},
-        )
-        assert resp_format.status_code == 403
 
         resp_extract = client.post(
             "/extract-document",

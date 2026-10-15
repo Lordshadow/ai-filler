@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { Building2, LogOut, Shield, UserRound } from "lucide-react";
 import { authFetch } from "./api";
 import ProfileEditor from "./ProfileEditor";
 import "./Auth.css";
@@ -305,7 +306,11 @@ export default function SuperAdminPanel() {
 
   const logout = async () => {
     const response = await authFetch("/auth/logout", { method: "POST" });
-    if (response.ok) navigate("/super-admin/login");
+    if (response.ok) {
+      window.sessionStorage.removeItem("fillerAiAccessToken");
+      localStorage.removeItem("userKind");
+      navigate("/super-admin/login");
+    }
     else setError("Logout failed.");
   };
 
@@ -317,14 +322,14 @@ export default function SuperAdminPanel() {
       <header className="panel-header">
         <div>
           <h1>Global Governance Console</h1>
-          <span style={{ color: "#64748b", fontSize: "14px" }}>
-            Super-Admin Tenant &amp; Administrator Management
+          <span style={{ color: "var(--text-secondary)", fontSize: "14px" }}>
+            Manage organizations and administrators
           </span>
         </div>
         <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-          <span className="profile-chip chip-status">Root Governance</span>
+          <span className="profile-chip chip-status">System administration</span>
           <button className="btn-logout" onClick={logout}>
-            Logout
+            <LogOut size={16} aria-hidden="true" /> Log out
           </button>
         </div>
       </header>
@@ -332,7 +337,7 @@ export default function SuperAdminPanel() {
       {/* Global Toast / Alerts */}
       {actionSuccessMsg && (
         <div className="profile-toast toast-success" style={{ marginBottom: "20px" }}>
-          <span>✅ {actionSuccessMsg}</span>
+          <span> {actionSuccessMsg}</span>
           <button className="toast-close" onClick={() => setActionSuccessMsg("")}>
             ×
           </button>
@@ -341,7 +346,7 @@ export default function SuperAdminPanel() {
 
       {error && (
         <div className="profile-toast toast-error" style={{ marginBottom: "20px" }}>
-          <span>⚠️ {error}</span>
+          <span> {error}</span>
           <button className="toast-close" onClick={() => setError("")}>
             ×
           </button>
@@ -357,7 +362,7 @@ export default function SuperAdminPanel() {
             setError("");
           }}
         >
-          🏢 Organizations Directory
+          <Building2 size={16} aria-hidden="true" /> Organizations
         </button>
         <button
           className={`tab ${activeTab === "admins" ? "active" : ""}`}
@@ -366,7 +371,7 @@ export default function SuperAdminPanel() {
             setError("");
           }}
         >
-          👥 Organization Admins Directory
+          <Shield size={16} aria-hidden="true" /> Administrators
         </button>
         <button
           className={`tab ${activeTab === "profile" ? "active" : ""}`}
@@ -375,7 +380,7 @@ export default function SuperAdminPanel() {
             setError("");
           }}
         >
-          ⚙️ Super Admin Profile &amp; Security
+          <UserRound size={16} aria-hidden="true" /> Profile and security
         </button>
       </div>
 
@@ -405,11 +410,11 @@ export default function SuperAdminPanel() {
           </div>
 
           {/* Quick Create Organization Form */}
-          <div className="info-card" style={{ marginBottom: "24px", background: "#f8fafc" }}>
-            <h3 style={{ margin: "0 0 8px 0", fontSize: "16px", color: "#0f172a" }}>
+          <div className="info-card" style={{ marginBottom: "24px", background: "rgba(255, 255, 255, 0.08)", border: "1px solid rgba(255, 255, 255, 0.22)" }}>
+            <h3 style={{ margin: "0 0 8px 0", fontSize: "16px", color: "#ffffff" }}>
               + Create New Organization
             </h3>
-            <p style={{ margin: "0 0 16px 0", fontSize: "13px", color: "#64748b" }}>
+            <p style={{ margin: "0 0 16px 0", fontSize: "13px", color: "var(--text-secondary)" }}>
               Add a new tenant domain to host isolated forms, admins, and respondent workflows.
             </p>
             <form onSubmit={handleCreateOrganization} style={{ display: "flex", gap: "12px", maxWidth: "600px" }}>
@@ -430,7 +435,6 @@ export default function SuperAdminPanel() {
           {/* Search bar */}
           <div className="sub-filter-row" style={{ marginBottom: "16px" }}>
             <div className="sub-search-box" style={{ flex: 1 }}>
-              <span className="search-icon">🔍</span>
               <input
                 type="text"
                 placeholder="Search organizations by name or ID…"
@@ -444,7 +448,7 @@ export default function SuperAdminPanel() {
               )}
             </div>
             <button className="btn-secondary" onClick={fetchOrganizations} disabled={loadingOrgs}>
-              🔄 Refresh
+               Refresh
             </button>
           </div>
 
@@ -453,9 +457,8 @@ export default function SuperAdminPanel() {
             <div className="loading">Loading organizations…</div>
           ) : filteredOrgs.length === 0 ? (
             <div className="sub-empty-state">
-              <span className="empty-icon">🏢</span>
               <h3>No organizations found</h3>
-              <p>Create an organization above to begin provisioning tenant environments.</p>
+              <p>Create an organization above to begin provisioning organizations.</p>
             </div>
           ) : (
             <div className="sub-table-wrapper">
@@ -503,21 +506,21 @@ export default function SuperAdminPanel() {
                               </button>
                             </div>
                           ) : (
-                            <strong style={{ color: "#0f172a" }}>{org.name}</strong>
+                            <strong style={{ color: "#ffffff" }}>{org.name}</strong>
                           )}
                         </td>
                         <td>
                           <button
                             type="button"
                             className="sub-pill pill-count"
-                            style={{ cursor: "pointer", border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1d4ed8" }}
+                            style={{ cursor: "pointer", border: "1px solid rgba(255, 255, 255, 0.25)", background: "rgba(255, 255, 255, 0.1)", color: "#ffffff" }}
                             title={`View administrators for ${org.name}`}
                             onClick={() => {
                               setAdminSearch(org.name);
                               setActiveTab("admins");
                             }}
                           >
-                            👥 {org.adminCount || 0} Admins ↗
+                             {org.adminCount || 0} Admins 
                           </button>
                         </td>
                         <td>
@@ -541,7 +544,7 @@ export default function SuperAdminPanel() {
                                 setEditingOrgName(org.name);
                               }}
                             >
-                              ✏️ Rename
+                               Rename
                             </button>
                           )}
                         </td>
@@ -571,7 +574,7 @@ export default function SuperAdminPanel() {
           >
             <div>
               <h2 style={{ margin: "0 0 4px 0", fontSize: "18px" }}>Provisioned Organization Administrators</h2>
-              <p style={{ margin: 0, fontSize: "13px", color: "#64748b" }}>
+              <p style={{ margin: 0, fontSize: "13px", color: "var(--text-secondary)" }}>
                 Oversee authorized administrators, assign organizations, and enforce security policies.
               </p>
             </div>
@@ -592,8 +595,8 @@ export default function SuperAdminPanel() {
               className="info-card"
               style={{
                 marginBottom: "24px",
-                border: "2px solid #3b82f6",
-                background: "#f0fdf4",
+                border: "1px solid rgba(255, 255, 255, 0.28)",
+                background: "rgba(255, 255, 255, 0.08)",
               }}
             >
               <div
@@ -604,7 +607,7 @@ export default function SuperAdminPanel() {
                   marginBottom: "16px",
                 }}
               >
-                <h3 style={{ margin: 0, color: "#166534" }}>Provision Organization Administrator</h3>
+                <h3 style={{ margin: 0, color: "#ffffff" }}>Provision Organization Administrator</h3>
                 <button
                   className="toast-close"
                   onClick={() => setShowProvisionModal(false)}
@@ -618,12 +621,12 @@ export default function SuperAdminPanel() {
                   className="info-card"
                   style={{
                     marginBottom: "16px",
-                    background: "#ffffff",
-                    border: "1px solid #bbf7d0",
-                    color: "#15803d",
+                    background: "rgba(255, 255, 255, 0.08)",
+                    border: "1px solid rgba(255, 255, 255, 0.25)",
+                    color: "#ffffff",
                   }}
                 >
-                  🎉 Administrator provisioned successfully! Login ID: <strong>{provisionedAdminId}</strong>
+                   Administrator created. Login ID: <strong style={{ color: "#ffffff" }}>{provisionedAdminId}</strong>
                 </div>
               )}
 
@@ -658,7 +661,7 @@ export default function SuperAdminPanel() {
                         value={provisionForm.organization_id}
                         onChange={(e) => setProvisionForm({ ...provisionForm, organization_id: e.target.value })}
                         required
-                        style={{ width: "100%", padding: "10px", borderRadius: "5px", border: "1px solid #ccc" }}
+                        style={{ width: "100%", padding: "10px", borderRadius: "10px", border: "1px solid rgba(255, 255, 255, 0.2)", background: "rgba(14, 16, 22, 0.72)", color: "#ffffff" }}
                       >
                         <option value="">-- Choose an Organization --</option>
                         {organizations.map((org) => (
@@ -737,7 +740,6 @@ export default function SuperAdminPanel() {
           {/* Search bar */}
           <div className="sub-filter-row" style={{ marginBottom: "16px" }}>
             <div className="sub-search-box" style={{ flex: 1 }}>
-              <span className="search-icon">🔍</span>
               <input
                 type="text"
                 placeholder="Search admins by Admin ID, Name, Email, or Organization…"
@@ -751,7 +753,7 @@ export default function SuperAdminPanel() {
               )}
             </div>
             <button className="btn-secondary" onClick={fetchAdmins} disabled={loadingAdmins}>
-              🔄 Refresh
+               Refresh
             </button>
           </div>
 
@@ -760,7 +762,6 @@ export default function SuperAdminPanel() {
             <div className="loading">Loading administrators…</div>
           ) : filteredAdmins.length === 0 ? (
             <div className="sub-empty-state">
-              <span className="empty-icon">👥</span>
               <h3>No administrators found</h3>
               <p>
                 {adminSearch
@@ -802,15 +803,15 @@ export default function SuperAdminPanel() {
                       <td>
                         <strong>{admin.fullName}</strong>
                         {admin.phoneNumber && (
-                          <span style={{ display: "block", fontSize: "11px", color: "#64748b" }}>
-                            📞 {admin.phoneNumber}
+                          <span style={{ display: "block", fontSize: "11px", color: "var(--text-secondary)" }}>
+                             {admin.phoneNumber}
                           </span>
                         )}
                       </td>
                       <td>{admin.email}</td>
                       <td>
-                        <span className="profile-chip" style={{ background: "#f1f5f9", color: "#334155" }}>
-                          🏢 {admin.organizationName}
+                        <span className="profile-chip" style={{ background: "rgba(255, 255, 255, 0.1)", color: "#ffffff", border: "1px solid rgba(255, 255, 255, 0.2)" }}>
+                           {admin.organizationName}
                         </span>
                       </td>
                       <td>
@@ -833,14 +834,14 @@ export default function SuperAdminPanel() {
                             className="btn-text-secondary"
                             onClick={() => setEditingAdmin({ ...admin })}
                           >
-                            ✏️ Edit
+                             Edit
                           </button>
                           <button
                             className="btn-text-secondary"
                             style={{ color: admin.isActive ? "#dc2626" : "#16a34a" }}
                             onClick={() => handleToggleAdminStatus(admin)}
                           >
-                            {admin.isActive ? "⛔ Suspend" : "✅ Activate"}
+                            {admin.isActive ? " Suspend" : " Activate"}
                           </button>
                           <button
                             className="btn-text-secondary"
@@ -849,7 +850,7 @@ export default function SuperAdminPanel() {
                               setNewAdminPassword("");
                             }}
                           >
-                            🔑 Reset Password
+                            Reset password
                           </button>
                         </div>
                       </td>
@@ -878,12 +879,16 @@ export default function SuperAdminPanel() {
             >
               <div
                 style={{
-                  background: "#ffffff",
-                  borderRadius: "10px",
-                  padding: "24px",
-                  maxWidth: "500px",
+                  background: "var(--glass-tier3-bg)",
+                  border: "var(--glass-tier3-border)",
+                  borderRadius: "24px",
+                  padding: "26px",
+                  maxWidth: "520px",
                   width: "90%",
-                  boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)",
+                  boxShadow: "var(--glass-tier3-shadow)",
+                  backdropFilter: "var(--glass-tier3-blur)",
+                  WebkitBackdropFilter: "var(--glass-tier3-blur)",
+                  color: "#ffffff",
                 }}
               >
                 <div
@@ -933,7 +938,7 @@ export default function SuperAdminPanel() {
                     <select
                       value={editingAdmin.organizationId || ""}
                       onChange={(e) => setEditingAdmin({ ...editingAdmin, organizationId: e.target.value })}
-                      style={{ width: "100%", padding: "10px", borderRadius: "5px", border: "1px solid #ccc" }}
+                      style={{ width: "100%", padding: "10px", borderRadius: "10px", border: "1px solid rgba(255, 255, 255, 0.2)", background: "rgba(14, 16, 22, 0.72)", color: "#ffffff" }}
                     >
                       {organizations.map((org) => (
                         <option key={org.id} value={org.id}>
@@ -955,7 +960,7 @@ export default function SuperAdminPanel() {
             </div>
           )}
 
-          {/* Reset Password Modal */}
+          {/*Reset password Modal */}
           {resettingAdmin && (
             <div
               style={{
@@ -973,12 +978,16 @@ export default function SuperAdminPanel() {
             >
               <div
                 style={{
-                  background: "#ffffff",
-                  borderRadius: "10px",
-                  padding: "24px",
-                  maxWidth: "450px",
+                  background: "var(--glass-tier3-bg)",
+                  border: "var(--glass-tier3-border)",
+                  borderRadius: "24px",
+                  padding: "26px",
+                  maxWidth: "480px",
                   width: "90%",
-                  boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)",
+                  boxShadow: "var(--glass-tier3-shadow)",
+                  backdropFilter: "var(--glass-tier3-blur)",
+                  WebkitBackdropFilter: "var(--glass-tier3-blur)",
+                  color: "#ffffff",
                 }}
               >
                 <div
@@ -994,7 +1003,7 @@ export default function SuperAdminPanel() {
                     ×
                   </button>
                 </div>
-                <p style={{ fontSize: "13px", color: "#64748b", marginBottom: "16px" }}>
+                <p style={{ fontSize: "13px", color: "var(--text-secondary)", marginBottom: "16px" }}>
                   Set a new password for administrator <strong>{resettingAdmin.fullName}</strong> ({resettingAdmin.adminId}).
                 </p>
                 <form onSubmit={handleResetPassword}>

@@ -1,12 +1,14 @@
 import { useEffect, useState, useMemo } from "react";
+import { createPortal } from "react-dom";
+import { Activity, CheckCircle2, Clock3, Copy, Download, FileText, RefreshCw, Search, Send, X, XCircle } from "lucide-react";
 import { authFetch } from "./api";
 import "./Auth.css";
 
 const STATUS_CONFIG = {
-  SUBMITTED: { label: "Submitted", color: "#2563eb", bg: "#eff6ff", dot: "#3b82f6" },
-  UNDER_REVIEW: { label: "Under Review", color: "#d97706", bg: "#fffbeb", dot: "#f59e0b" },
-  APPROVED: { label: "Approved", color: "#16a34a", bg: "#f0fdf4", dot: "#22c55e" },
-  REJECTED: { label: "Rejected", color: "#dc2626", bg: "#fef2f2", dot: "#ef4444" },
+  SUBMITTED: { label: "Submitted", color: "#e4e4e7", bg: "rgba(255, 255, 255, 0.08)", dot: "#ffffff" },
+  UNDER_REVIEW: { label: "Under Review", color: "#f4f4f5", bg: "rgba(255, 255, 255, 0.08)", dot: "#d4d4d8" },
+  APPROVED: { label: "Approved", color: "#ffffff", bg: "rgba(255, 255, 255, 0.12)", dot: "#ffffff" },
+  REJECTED: { label: "Rejected", color: "#fca5a5", bg: "rgba(255, 255, 255, 0.06)", dot: "#f87171" },
 };
 
 export default function SubmissionsManager() {
@@ -189,16 +191,17 @@ export default function SubmissionsManager() {
       {/* ── 1. Header & Quick Actions ── */}
       <div className="sub-header-bar">
         <div>
-          <h2 style={{ margin: "0 0 4px 0", fontSize: "22px", color: "#1e293b" }}>
-            Form Submissions & Applications
+          <h2 className="sub-page-title">
+            <FileText size={21} aria-hidden="true" /> Submissions
           </h2>
-          <p style={{ margin: 0, color: "#64748b", fontSize: "14px" }}>
-            Monitor, inspect, and review submitted forms in real time.
+          <p className="sub-page-description">
+            Review and manage submitted applications.
           </p>
         </div>
         <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
           <button className="btn-secondary" onClick={fetchData} disabled={loading} style={{ fontSize: "13px" }}>
-            {loading ? "Refreshing…" : "↻ Refresh"}
+            <RefreshCw size={15} aria-hidden="true" className={loading ? "is-spinning" : ""} />
+            {loading ? "Refreshing" : "Refresh"}
           </button>
           <button
             className="btn-primary"
@@ -206,7 +209,7 @@ export default function SubmissionsManager() {
             disabled={filteredSubmissions.length === 0}
             style={{ fontSize: "13px", padding: "8px 16px" }}
           >
-            📥 Export CSV
+            <Download size={15} aria-hidden="true" /> Export CSV
           </button>
         </div>
       </div>
@@ -215,23 +218,28 @@ export default function SubmissionsManager() {
 
       {/* ── 2. Metric KPI Cards ── */}
       <div className="sub-metrics-grid">
-        <div className="sub-metric-card">
+        <div className="sub-metric-card metric-total">
+          <Activity size={17} aria-hidden="true" className="sub-metric-icon" />
           <span className="sub-metric-label">Total Submissions</span>
           <span className="sub-metric-val">{metrics.total}</span>
         </div>
-        <div className="sub-metric-card" style={{ borderLeft: "4px solid #3b82f6" }}>
+        <div className="sub-metric-card metric-submitted" style={{ borderLeft: "4px solid #3b82f6" }}>
+          <Send size={17} aria-hidden="true" className="sub-metric-icon" />
           <span className="sub-metric-label">Submitted (New)</span>
           <span className="sub-metric-val" style={{ color: "#2563eb" }}>{metrics.submitted}</span>
         </div>
-        <div className="sub-metric-card" style={{ borderLeft: "4px solid #f59e0b" }}>
+        <div className="sub-metric-card metric-review" style={{ borderLeft: "4px solid #f59e0b" }}>
+          <Clock3 size={17} aria-hidden="true" className="sub-metric-icon" />
           <span className="sub-metric-label">Under Review</span>
           <span className="sub-metric-val" style={{ color: "#d97706" }}>{metrics.underReview}</span>
         </div>
-        <div className="sub-metric-card" style={{ borderLeft: "4px solid #22c55e" }}>
+        <div className="sub-metric-card metric-approved" style={{ borderLeft: "4px solid #22c55e" }}>
+          <CheckCircle2 size={17} aria-hidden="true" className="sub-metric-icon" />
           <span className="sub-metric-label">Approved</span>
           <span className="sub-metric-val" style={{ color: "#16a34a" }}>{metrics.approved}</span>
         </div>
-        <div className="sub-metric-card" style={{ borderLeft: "4px solid #ef4444" }}>
+        <div className="sub-metric-card metric-rejected" style={{ borderLeft: "4px solid #ef4444" }}>
+          <XCircle size={17} aria-hidden="true" className="sub-metric-icon" />
           <span className="sub-metric-label">Rejected</span>
           <span className="sub-metric-val" style={{ color: "#dc2626" }}>{metrics.rejected}</span>
         </div>
@@ -240,11 +248,12 @@ export default function SubmissionsManager() {
       {/* ── 3. Filter Bar & View Toggles ── */}
       <div className="sub-filter-card">
         {/* Search */}
-        <div style={{ flex: "1 1 240px" }}>
+        <div className="sub-search-wrap">
+          <Search size={17} aria-hidden="true" />
           <input
             type="text"
             className="sub-search-input"
-            placeholder="🔍 Search by ID, form name, applicant email, or answer..."
+            placeholder="Search by ID, form, applicant, or answer"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -304,7 +313,7 @@ export default function SubmissionsManager() {
             onClick={() => setViewMode("grouped")}
             title="Group by Form"
           >
-            📑 Form Order
+            By form
           </button>
           <button
             type="button"
@@ -312,19 +321,19 @@ export default function SubmissionsManager() {
             onClick={() => setViewMode("table")}
             title="Standard Table Grid"
           >
-            📊 Flat Table
+            Table view
           </button>
         </div>
       </div>
 
       {/* ── 4. Content Area ── */}
       {loading ? (
-        <div style={{ textAlign: "center", padding: "60px 20px", color: "#64748b" }}>
+        <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--text-secondary)" }}>
           Loading filled form submissions...
         </div>
       ) : filteredSubmissions.length === 0 ? (
         <div className="no-forms-card">
-          <div className="no-forms-icon">📥</div>
+
           <h3>No Form Submissions Found</h3>
           <p>
             {submissions.length === 0
@@ -333,20 +342,20 @@ export default function SubmissionsManager() {
           </p>
         </div>
       ) : viewMode === "grouped" ? (
-        /* ── View A: Grouped by Form Order ── */
+        /* ── View A: Grouped byBy form ── */
         <div className="sub-groups-container">
           {groupedByForm.map((group) => (
             <div key={group.formId} className="sub-group-card">
               <div className="sub-group-header">
                 <div>
-                  <h3 style={{ margin: "0 0 4px 0", fontSize: "18px", color: "#1e293b" }}>
-                    📋 {group.formTitle}
+                  <h3 style={{ margin: "0 0 4px 0", fontSize: "18px", color: "#ffffff" }}>
+                     {group.formTitle}
                   </h3>
-                  <span style={{ fontSize: "12px", color: "#64748b" }}>
-                    Form ID: <code>{group.formId}</code>
+                  <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                    Form ID: <code style={{ color: "#ffffff" }}>{group.formId}</code>
                   </span>
                 </div>
-                <span className="badge-published" style={{ background: "#e0e7ff", color: "#3730a3" }}>
+                <span className="badge-published" style={{ background: "rgba(255, 255, 255, 0.12)", color: "#ffffff", border: "1px solid rgba(255, 255, 255, 0.24)" }}>
                   {group.items.length} {group.items.length === 1 ? "Submission" : "Submissions"}
                 </span>
               </div>
@@ -384,14 +393,14 @@ export default function SubmissionsManager() {
                             </code>
                           </td>
                           <td>
-                            <div style={{ fontWeight: 600, color: "#1e293b", fontSize: "13px" }}>
+                            <div style={{ fontWeight: 600, color: "#ffffff", fontSize: "13px" }}>
                               {sub.userName || "Applicant"}
                             </div>
-                            <div style={{ fontSize: "12px", color: "#64748b" }}>
+                            <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
                               {sub.userEmail || "No email"}
                             </div>
                           </td>
-                          <td style={{ fontSize: "13px", color: "#475569", whiteSpace: "nowrap" }}>
+                          <td style={{ fontSize: "13px", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
                             {sub.submittedAt ? new Date(sub.submittedAt).toLocaleString() : "N/A"}
                           </td>
                           <td>
@@ -406,7 +415,7 @@ export default function SubmissionsManager() {
                               {cfg.label}
                             </span>
                           </td>
-                          <td style={{ fontSize: "13px", color: "#64748b", maxWidth: "260px" }}>
+                          <td style={{ fontSize: "13px", color: "var(--text-secondary)", maxWidth: "260px" }}>
                             <div className="sub-preview-text">
                               {previewStr || "Empty response"}
                             </div>
@@ -476,20 +485,20 @@ export default function SubmissionsManager() {
                       <code className="sub-id-pill">{sub.applicationId}</code>
                     </td>
                     <td>
-                      <div style={{ fontWeight: 600, color: "#1e293b", fontSize: "13px" }}>
+                      <div style={{ fontWeight: 600, color: "#ffffff", fontSize: "13px" }}>
                         {sub.formTitle || sub.formId}
                       </div>
-                      <div style={{ fontSize: "11px", color: "#64748b" }}>v{sub.formVersion}</div>
+                      <div style={{ fontSize: "11px", color: "var(--text-secondary)" }}>v{sub.formVersion}</div>
                     </td>
                     <td>
-                      <div style={{ fontWeight: 600, color: "#1e293b", fontSize: "13px" }}>
+                      <div style={{ fontWeight: 600, color: "#ffffff", fontSize: "13px" }}>
                         {sub.userName || "Applicant"}
                       </div>
-                      <div style={{ fontSize: "12px", color: "#64748b" }}>
+                      <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
                         {sub.userEmail || "No email"}
                       </div>
                     </td>
-                    <td style={{ fontSize: "13px", color: "#475569", whiteSpace: "nowrap" }}>
+                    <td style={{ fontSize: "13px", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
                       {sub.submittedAt ? new Date(sub.submittedAt).toLocaleString() : "N/A"}
                     </td>
                     <td>
@@ -501,7 +510,7 @@ export default function SubmissionsManager() {
                         {cfg.label}
                       </span>
                     </td>
-                    <td style={{ fontSize: "13px", color: "#64748b", maxWidth: "260px" }}>
+                    <td style={{ fontSize: "13px", color: "var(--text-secondary)", maxWidth: "260px" }}>
                       <div className="sub-preview-text">{previewStr || "Empty response"}</div>
                     </td>
                     <td style={{ textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
@@ -535,15 +544,15 @@ export default function SubmissionsManager() {
       )}
 
       {/* ── 5. Slide-Out Details Drawer (Airtable / Typeform style) ── */}
-      {selectedSub && (
+      {selectedSub && createPortal(
         <div className="sub-drawer-overlay" onClick={() => setSelectedSub(null)}>
-          <div className="sub-drawer" onClick={(e) => e.stopPropagation()}>
+          <div className="sub-drawer" role="dialog" aria-modal="true" aria-label="Submission inspector" onClick={(e) => e.stopPropagation()}>
             <div className="sub-drawer-header">
               <div>
-                <span style={{ fontSize: "12px", color: "#6366f1", fontWeight: 700, textTransform: "uppercase" }}>
-                  Submission Inspector
+                <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  Submission review
                 </span>
-                <h3 style={{ margin: "4px 0 0 0", fontSize: "20px", color: "#1e293b" }}>
+                <h3 style={{ margin: "4px 0 0 0", fontSize: "20px", color: "#ffffff" }}>
                   {selectedSub.formTitle || selectedSub.formId}
                 </h3>
               </div>
@@ -553,13 +562,13 @@ export default function SubmissionsManager() {
                 onClick={() => setSelectedSub(null)}
                 title="Close drawer"
               >
-                ✕
+                <X size={18} aria-hidden="true" />
               </button>
             </div>
 
             <div className="sub-drawer-body">
               {statusSuccessMsg && (
-                <div className="info-card" style={{ marginBottom: "16px", color: "#15803d", background: "#f0fdf4" }}>
+                <div className="info-card" style={{ marginBottom: "16px", color: "#ffffff", background: "rgba(255, 255, 255, 0.08)", border: "1px solid rgba(255, 255, 255, 0.2)" }}>
                   {statusSuccessMsg}
                 </div>
               )}
@@ -581,7 +590,7 @@ export default function SubmissionsManager() {
                     <option value="REJECTED">Rejected</option>
                   </select>
                   <span
-                    className="sub-status-pill"
+                    className={`sub-status-pill status-${(selectedSub.status || "SUBMITTED").toLowerCase()}`}
                     style={{
                       background: STATUS_CONFIG[selectedSub.status]?.bg || "#f1f5f9",
                       color: STATUS_CONFIG[selectedSub.status]?.color || "#334155",
@@ -601,31 +610,32 @@ export default function SubmissionsManager() {
                 <span className="sub-section-title">Submission Metadata</span>
                 <div className="sub-meta-grid">
                   <div>
-                    <strong style={{ color: "#475569", fontSize: "12px" }}>Reference ID</strong>
+                    <strong style={{ color: "var(--text-secondary)", fontSize: "12px" }}>Reference ID</strong>
                     <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
                       <code style={{ fontSize: "12px" }}>{selectedSub.applicationId}</code>
                       <button
                         type="button"
-                        style={{ border: "none", background: "none", cursor: "pointer", fontSize: "12px" }}
+                        className="sub-copy-id-btn"
                         onClick={() => copyToClipboard(selectedSub.applicationId)}
-                        title="Copy ID"
+                        title="Copy reference ID"
+                        aria-label="Copy reference ID"
                       >
-                        📋
+                        <Copy size={14} aria-hidden="true" />
                       </button>
                     </div>
                   </div>
                   <div>
-                    <strong style={{ color: "#475569", fontSize: "12px" }}>Form Version</strong>
+                    <strong style={{ color: "var(--text-secondary)", fontSize: "12px" }}>Form Version</strong>
                     <div style={{ marginTop: "2px", fontSize: "13px" }}>v{selectedSub.formVersion}</div>
                   </div>
                   <div>
-                    <strong style={{ color: "#475569", fontSize: "12px" }}>Submitted By</strong>
+                    <strong style={{ color: "var(--text-secondary)", fontSize: "12px" }}>Submitted By</strong>
                     <div style={{ marginTop: "2px", fontSize: "13px" }}>
                       {selectedSub.userName || "Applicant"} ({selectedSub.userEmail || "No email"})
                     </div>
                   </div>
                   <div>
-                    <strong style={{ color: "#475569", fontSize: "12px" }}>Submission Timestamp</strong>
+                    <strong style={{ color: "var(--text-secondary)", fontSize: "12px" }}>Submission Timestamp</strong>
                     <div style={{ marginTop: "2px", fontSize: "13px" }}>
                       {selectedSub.submittedAt ? new Date(selectedSub.submittedAt).toLocaleString() : "N/A"}
                     </div>
@@ -665,14 +675,14 @@ export default function SubmissionsManager() {
               </div>
 
               {/* Action Buttons */}
-              <div style={{ display: "flex", gap: "10px", marginTop: "20px" }}>
+              <div className="sub-drawer-actions" style={{ display: "flex", gap: "10px", marginTop: "20px" }}>
                 <button
                   type="button"
                   className="btn-secondary"
                   style={{ flex: 1 }}
                   onClick={() => copyToClipboard(JSON.stringify(selectedSub, null, 2))}
                 >
-                  📋 Copy JSON
+                  <Copy size={15} aria-hidden="true" /> Copy details
                 </button>
                 <button
                   type="button"
@@ -685,7 +695,8 @@ export default function SubmissionsManager() {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

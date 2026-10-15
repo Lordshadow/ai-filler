@@ -1,14 +1,55 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { ArrowLeft, ArrowRight, FileText, Inbox, LogOut, Send, UserRound, FileUp, RefreshCw, Mic, RotateCcw } from "lucide-react";
 import { authFetch } from "./api";
 import ProfileEditor from "./ProfileEditor";
+import VoiceFormAssistant from "./VoiceFormAssistant";
 import "./Auth.css";
+
+const USER_STATUS_CONFIG = {
+  SUBMITTED: {
+    label: "Submitted",
+    desc: "Your form has been received and is queued for administrator review.",
+    color: "#e4e4e7",
+    bg: "rgba(255, 255, 255, 0.08)",
+    border: "rgba(255, 255, 255, 0.22)",
+    dot: "#ffffff",
+    step: 1,
+  },
+  UNDER_REVIEW: {
+    label: "Under Review",
+    desc: "An administrator is currently reviewing your submitted form and answers.",
+    color: "#f4f4f5",
+    bg: "rgba(255, 255, 255, 0.08)",
+    border: "rgba(255, 255, 255, 0.22)",
+    dot: "#d4d4d8",
+    step: 2,
+  },
+  APPROVED: {
+    label: "Approved",
+    desc: "Congratulations! Your submitted form has been reviewed and approved.",
+    color: "#ffffff",
+    bg: "rgba(255, 255, 255, 0.12)",
+    border: "rgba(255, 255, 255, 0.35)",
+    dot: "#ffffff",
+    step: 3,
+  },
+  REJECTED: {
+    label: "Rejected",
+    desc: "Your submission was not approved. You may review your answers or submit a new response.",
+    color: "#fca5a5",
+    bg: "rgba(255, 255, 255, 0.06)",
+    border: "rgba(248, 113, 113, 0.35)",
+    dot: "#f87171",
+    step: 3,
+  },
+};
 
 export default function UserPanel() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [activeTab, setActiveTab] = useState("forms"); // "forms" | "profile"
+  const [activeTab, setActiveTab] = useState("forms"); // "forms" | "submissions" | "profile"
 
   // Forms state
   const [forms, setForms] = useState([]);
@@ -16,24 +57,26 @@ export default function UserPanel() {
   const [activeForm, setActiveForm] = useState(null);
   const [formData, setFormData] = useState({});
   const [fieldProvenance, setFieldProvenance] = useState({});
-  const [fieldConfidence, setFieldConfidence] = useState({});
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [submissionSuccess, setSubmissionSuccess] = useState(null);
   const [submissionError, setSubmissionError] = useState("");
 
-  // Multi-Agent AI Smart-Fill state (Voice & Document icons)
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingFieldKey, setRecordingFieldKey] = useState(null); // null = full form, string = specific field
+  // User's Submitted Forms & Status Review state
+  const [mySubmissions, setMySubmissions] = useState([]);
+  const [loadingSubmissions, setLoadingSubmissions] = useState(true);
+  const [selectedReviewSub, setSelectedReviewSub] = useState(null);
+  const [subSearchQuery, setSubSearchQuery] = useState("");
+  const [subStatusFilter, setSubStatusFilter] = useState("ALL");
+  const [subFormFilter, setSubFormFilter] = useState("ALL");
+
+  // Multi-Agent AI document fill state
   const [aiProcessing, setAiProcessing] = useState(false);
   const [aiStatusText, setAiStatusText] = useState("");
   const [aiResultMeta, setAiResultMeta] = useState(null);
-  const [showVoiceTextPrompt, setShowVoiceTextPrompt] = useState(false);
-  const [voiceTextInput, setVoiceTextInput] = useState("");
+  const [showVoiceAssistant, setShowVoiceAssistant] = useState(false);
+  const [voiceLanguage, setVoiceLanguage] = useState("auto");
 
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
   const docInputRef = useRef(null);
-  const audioInputRef = useRef(null);
 
   const navigate = useNavigate();
 
@@ -67,6 +110,25 @@ export default function UserPanel() {
     }
   }, []);
 
+  const fetchMySubmissions = useCallback(async () => {
+    setLoadingSubmissions(true);
+    try {
+      const response = await authFetch("/applications");
+      if (response.ok) {
+        const data = await response.json();
+        const apps = data.applications || [];
+        setMySubmissions(apps);
+        setSelectedReviewSub((prev) =>
+          prev ? apps.find((a) => a.applicationId === prev.applicationId) || prev : null
+        );
+      }
+    } catch (err) {
+      console.error("Failed to fetch user submissions:", err);
+    } finally {
+      setLoadingSubmissions(false);
+    }
+  }, []);
+
   const handleRefreshForms = async () => {
     setLoadingForms(true);
     await fetchForms();
@@ -75,7 +137,39 @@ export default function UserPanel() {
   useEffect(() => {
     fetchUser();
     fetchForms();
-  }, [fetchUser, fetchForms]);
+    fetchMySubmissions();
+  }, [fetchUser, fetchForms, fetchMySubmissions]);
+
+  const submissionMetrics = useMemo(() => {
+    const total = mySubmissions.length;
+    const submitted = mySubmissions.filter((s) => s.status === "SUBMITTED").length;
+    const underReview = mySubmissions.filter((s) => s.status === "UNDER_REVIEW").length;
+    const approved = mySubmissions.filter((s) => s.status === "APPROVED").length;
+    const rejected = mySubmissions.filter((s) => s.status === "REJECTED").length;
+    return { total, submitted, underReview, approved, rejected };
+  }, [mySubmissions]);
+
+  const filteredMySubmissions = useMemo(() => {
+    return mySubmissions.filter((sub) => {
+      if (subStatusFilter !== "ALL" && sub.status !== subStatusFilter) return false;
+      if (subFormFilter !== "ALL" && sub.formId !== subFormFilter) return false;
+      if (subSearchQuery.trim()) {
+        const q = subSearchQuery.toLowerCase();
+        const idMatch = sub.applicationId?.toLowerCase().includes(q);
+        const titleMatch = (sub.formTitle || sub.formId || "").toLowerCase().includes(q);
+        const dataMatch = JSON.stringify(sub.data || {}).toLowerCase().includes(q);
+        if (!idMatch && !titleMatch && !dataMatch) return false;
+      }
+      return true;
+    });
+  }, [mySubmissions, subStatusFilter, subFormFilter, subSearchQuery]);
+
+  const getFieldLabel = (formId, fieldKey) => {
+    const form = forms.find((f) => f.formId === formId);
+    if (!form || !form.fields) return fieldKey;
+    const field = form.fields.find((f) => (f.fieldKey || f.name) === fieldKey);
+    return field ? field.label : fieldKey;
+  };
 
   const handleLogout = async () => {
     try {
@@ -84,6 +178,7 @@ export default function UserPanel() {
       });
 
       if (response.ok) {
+        window.sessionStorage.removeItem("fillerAiAccessToken");
         localStorage.removeItem("userKind");
         navigate("/login");
       } else {
@@ -92,6 +187,20 @@ export default function UserPanel() {
     } catch {
       setError("Logout failed");
     }
+  };
+
+  const isVoiceEnabled = (form) => {
+    if (!form) return false;
+    if (form.enableVoice !== undefined) return Boolean(form.enableVoice);
+    if (form.enable_voice !== undefined) return Boolean(form.enable_voice);
+    return true;
+  };
+
+  const isDocUploadEnabled = (form) => {
+    if (!form) return false;
+    if (form.enableDocUpload !== undefined) return Boolean(form.enableDocUpload);
+    if (form.enable_doc_upload !== undefined) return Boolean(form.enable_doc_upload);
+    return true;
   };
 
   const buildInitialFormData = (form) => {
@@ -116,30 +225,19 @@ export default function UserPanel() {
     setAiResultMeta(null);
     setAiStatusText("");
     setFieldProvenance({});
-    setFieldConfidence({});
     setFormData(buildInitialFormData(form));
-
-    if (autoAction === "document") {
+    if (autoAction === "document" && isDocUploadEnabled(form)) {
       setTimeout(() => {
         docInputRef.current?.click();
       }, 120);
-    } else if (autoAction === "voice") {
-      setTimeout(() => {
-        handleToggleVoiceRecording(null, form);
-      }, 120);
+    } else if (autoAction === "voice" && isVoiceEnabled(form)) {
+      setShowVoiceAssistant(true);
+    } else {
+      setShowVoiceAssistant(false);
     }
   };
 
   const handleCancelForm = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch {
-        // ignore
-      }
-    }
-    setIsRecording(false);
-    setRecordingFieldKey(null);
     setActiveForm(null);
     setSubmissionSuccess(null);
     setSubmissionError("");
@@ -147,7 +245,14 @@ export default function UserPanel() {
     setAiStatusText("");
     setFormData({});
     setFieldProvenance({});
-    setFieldConfidence({});
+  };
+
+  const handleClearForm = () => {
+    if (!activeForm) return;
+    setFormData(buildInitialFormData(activeForm));
+    setFieldProvenance({});
+    setAiResultMeta(null);
+    setSubmissionError("");
   };
 
   const applyMultiAgentFillResult = (result, currentForm) => {
@@ -156,7 +261,6 @@ export default function UserPanel() {
 
     const extractedFields = result.fields || {};
     const provenance = result.provenance || {};
-    const confScores = result.confidence_scores || {};
 
     setFormData((prev) => {
       const updated = { ...prev };
@@ -179,13 +283,7 @@ export default function UserPanel() {
     });
 
     setFieldProvenance((prev) => ({ ...prev, ...provenance }));
-    setFieldConfidence((prev) => ({ ...prev, ...confScores }));
     setAiResultMeta({
-      accuracyScore: result.accuracy_score || 98.5,
-      pipelineMode: result.pipeline_mode || "multi_agent_v2",
-      modelsUsed: result.models_used || {},
-      agentTrace: result.agent_trace || [],
-      transcript: result.transcript || "",
       documents: result.documents || [],
       populatedCount: Object.values(extractedFields).filter(
         (v) => v !== "" && v !== null && v !== undefined && (!Array.isArray(v) || v.length > 0)
@@ -193,142 +291,15 @@ export default function UserPanel() {
     });
   };
 
-  const sendAudioToMultiAgent = async (audioBlob, filename, targetFieldKey = null, formOverride = null) => {
-    const targetForm = formOverride || activeForm;
-    if (!targetForm) return;
-
-    setAiProcessing(true);
-    setSubmissionError("");
-    setAiStatusText(
-      targetFieldKey
-        ? `Multi-Agent Voice AI extracting field '${targetFieldKey}' (Whisper-v3 → Extractor → Critic)...`
-        : "Multi-Agent Voice AI transcribing & mapping form fields (Whisper-v3 → Extractor → Critic)..."
-    );
-
-    try {
-      const payload = new FormData();
-      payload.append("file", audioBlob, filename);
-      payload.append("fields_json", JSON.stringify(targetForm.fields || []));
-      payload.append("form_title", targetForm.title || "");
-      if (targetFieldKey) {
-        payload.append("target_field_key", targetFieldKey);
-      }
-      payload.append("current_data_json", JSON.stringify(formData || {}));
-
-      const response = await authFetch("/ai/fill-form/voice", {
-        method: "POST",
-        body: payload,
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail || "Voice AI form filling failed.");
-      }
-
-      applyMultiAgentFillResult(data, targetForm);
-      setAiStatusText("");
-    } catch (err) {
-      setSubmissionError(err.message || "Voice AI extraction failed.");
-      setAiStatusText("");
-    } finally {
-      setAiProcessing(false);
-    }
-  };
-
-  const handleToggleVoiceRecording = async (targetFieldKey = null, formOverride = null) => {
-    setSubmissionError("");
-
-    if (isRecording) {
-      mediaRecorderRef.current?.stop();
-      setIsRecording(false);
-      setRecordingFieldKey(null);
-      return;
-    }
-
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setShowVoiceTextPrompt(true);
-      setRecordingFieldKey(targetFieldKey);
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      audioChunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        stream.getTracks().forEach((track) => track.stop());
-        await sendAudioToMultiAgent(audioBlob, "recording.webm", targetFieldKey, formOverride);
-      };
-
-      mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start();
-      setIsRecording(true);
-      setRecordingFieldKey(targetFieldKey);
-    } catch {
-      // Fallback to voice dictation prompt modal if microphone permission is denied or unavailable
-      setShowVoiceTextPrompt(true);
-      setRecordingFieldKey(targetFieldKey);
-    }
-  };
-
-  const handleAudioFileUpload = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file || !activeForm) return;
-    await sendAudioToMultiAgent(file, file.name, recordingFieldKey, activeForm);
-  };
-
-  const handleVoiceTextSubmit = async () => {
-    if (!voiceTextInput.trim() || !activeForm) return;
-    setAiProcessing(true);
-    setSubmissionError("");
-    setAiStatusText("Multi-Agent AI extracting & verifying form fields...");
-
-    try {
-      const response = await authFetch("/ai/fill-form/text", {
-        method: "POST",
-        body: JSON.stringify({
-          text: voiceTextInput,
-          fields: activeForm.fields || [],
-          form_title: activeForm.title || "",
-          target_field_key: recordingFieldKey || null,
-          current_data: formData,
-          source_type: "AI_VOICE",
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail || "Multi-Agent voice text fill failed.");
-      }
-      applyMultiAgentFillResult({ ...data, transcript: voiceTextInput }, activeForm);
-      setShowVoiceTextPrompt(false);
-      setVoiceTextInput("");
-      setRecordingFieldKey(null);
-    } catch (err) {
-      setSubmissionError(err.message || "Failed to process dictation.");
-    } finally {
-      setAiProcessing(false);
-      setAiStatusText("");
-    }
-  };
-
   const handleDocumentUploadFill = async (e) => {
     const selectedFiles = Array.from(e.target.files || []);
     e.target.value = "";
-    if (selectedFiles.length === 0 || !activeForm) return;
+    if (selectedFiles.length === 0 || !activeForm || !isDocUploadEnabled(activeForm)) return;
 
     setAiProcessing(true);
     setSubmissionError("");
     setAiStatusText(
-      `Multi-Agent Document AI parsing ${selectedFiles.length} file(s) & verifying schema compliance...`
+      `Reading ${selectedFiles.length} document(s)...`
     );
 
     try {
@@ -355,6 +326,91 @@ export default function UserPanel() {
       setAiProcessing(false);
       setAiStatusText("");
     }
+  };
+
+  const handleVoiceAnswer = async (text, field) => {
+    setAiProcessing(true);
+    setSubmissionError("");
+    try {
+      const key = field.fieldKey || field.name;
+      const response = await authFetch("/ai/fill-form/text", {
+        method: "POST",
+        body: JSON.stringify({
+          text,
+          fields: activeForm.fields || [],
+          form_title: activeForm.title || "",
+          source_type: "AI_VOICE",
+          target_field_key: key,
+          current_data: formData,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "I couldn't understand that answer. Please try again.");
+      const targetVal = result.fields?.[key];
+      if (targetVal !== undefined && targetVal !== null && targetVal !== "") {
+        setFormData((prev) => ({
+          ...prev,
+          [key]: field.type === "multiselect"
+            ? (Array.isArray(targetVal) ? targetVal : [String(targetVal)])
+            : field.type === "checkbox"
+            ? Boolean(targetVal)
+            : String(targetVal),
+        }));
+        if (result.provenance?.[key]) {
+          setFieldProvenance((prev) => ({ ...prev, [key]: result.provenance[key] }));
+        }
+        return { populated: !Array.isArray(targetVal) || targetVal.length > 0 };
+      }
+      return { populated: false };
+    } finally {
+      setAiProcessing(false);
+    }
+  };
+
+  const handleVoiceAudio = async (audioBlob, field, language) => {
+    setAiProcessing(true);
+    try {
+      const extension = audioBlob.type.includes("mp4") ? "m4a" : audioBlob.type.includes("ogg") ? "ogg" : "webm";
+      const payload = new FormData();
+      payload.append("file", audioBlob, `voice-answer.${extension}`);
+      payload.append("language", language === "ta" ? "ta" : language.startsWith("en") ? "en" : "auto");
+      payload.append("form_title", activeForm.title || "");
+      payload.append("field_label", field.label || "");
+      payload.append("options_json", JSON.stringify(field.validation?.options || []));
+      const response = await authFetch("/ai/voice/transcribe", { method: "POST", body: payload });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "Voice transcription failed.");
+      return result.text || "";
+    } finally {
+      setAiProcessing(false);
+    }
+  };
+
+  const handleAssistantSpeak = async (text, voice) => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await authFetch("/ai/voice/speak", {
+        method: "POST",
+        body: JSON.stringify({ text, voice }),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error("Natural voice playback is unavailable.");
+      return response.blob();
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  };
+
+  const clearVoiceField = (field) => {
+    const key = field.fieldKey || field.name;
+    const emptyValue = field.type === "multiselect" ? [] : field.type === "checkbox" ? false : "";
+    setFormData((previous) => ({ ...previous, [key]: emptyValue }));
+    setFieldProvenance((previous) => {
+      const next = { ...previous };
+      delete next[key];
+      return next;
+    });
   };
 
   const handleManualFieldChange = (key, newValue) => {
@@ -454,7 +510,9 @@ export default function UserPanel() {
       setSubmissionSuccess({
         applicationId: result.application?.applicationId || result.applicationId,
         submittedAt: result.application?.submittedAt || new Date().toISOString(),
+        application: result.application || null,
       });
+      await fetchMySubmissions();
     } catch (err) {
       setSubmissionError(err.message || "Failed to submit application.");
     } finally {
@@ -472,52 +530,72 @@ export default function UserPanel() {
 
   return (
     <div className="panel-container">
-      {/* Top Application Navigation */}
-      <nav className="page-nav" style={{ marginBottom: "24px" }}>
-        <button
-          className={activeTab === "forms" ? "selected" : ""}
-          onClick={() => {
-            setActiveTab("forms");
-            setActiveForm(null);
-          }}
-        >
-          📋 Available Forms
-        </button>
-        <button
-          className={activeTab === "profile" ? "selected" : ""}
-          onClick={() => {
-            setActiveTab("profile");
-            setActiveForm(null);
-          }}
-          style={{ marginLeft: "auto" }}
-        >
-          👤 My Profile
-        </button>
-      </nav>
+      {/* Unified Enterprise Top Bar: Brand Header + Navigation */}
+      <header className="portal-topbar">
+        <div className="portal-topbar-main">
+          <div className="portal-brand">
 
-      {/* Header with Title and Logout */}
-      <div className="panel-header">
-        <div>
-          <h1>User Portal</h1>
-          <span style={{ color: "#64748b", fontSize: "14px" }}>
-            Welcome, {user?.full_name || "Applicant"} ({user?.email})
-          </span>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <h1>Applicant portal</h1>
+                <span className="portal-role-pill">Workspace</span>
+              </div>
+              <p className="portal-welcome-text">
+                Signed in as <strong>{user?.full_name || "Applicant"}</strong>
+              </p>
+            </div>
+          </div>
+          <button className="btn-logout" onClick={handleLogout}>
+            <LogOut size={16} aria-hidden="true" /> Sign out
+          </button>
         </div>
-        <button className="btn-logout" onClick={handleLogout}>
-          Logout
-        </button>
-      </div>
+
+        <nav className="page-nav" aria-label="Applicant portal Navigation">
+          <button
+            type="button"
+            className={activeTab === "forms" ? "selected" : ""}
+            onClick={() => {
+              setActiveTab("forms");
+              setActiveForm(null);
+            }}
+          >
+            <FileText size={16} aria-hidden="true" /><span>Forms</span>
+            <span className="nav-count-pill">{forms.length}</span>
+          </button>
+          <button
+            type="button"
+            className={activeTab === "submissions" ? "selected" : ""}
+            onClick={() => {
+              setActiveTab("submissions");
+              setActiveForm(null);
+              fetchMySubmissions();
+            }}
+          >
+            <Inbox size={16} aria-hidden="true" /><span>Submissions</span>
+            <span className="nav-count-pill">{mySubmissions.length}</span>
+          </button>
+          <button
+            type="button"
+            className={activeTab === "profile" ? "selected" : ""}
+            onClick={() => {
+              setActiveTab("profile");
+              setActiveForm(null);
+            }}
+            style={{ marginLeft: "auto" }}
+          >
+            <UserRound size={16} aria-hidden="true" /> Profile
+          </button>
+        </nav>
+      </header>
 
       {/* Available Forms View */}
       {activeTab === "forms" && !activeForm && (
         <div className="panel-section">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+          <div className="section-header-row">
             <div>
-              <h2 style={{ margin: "0 0 4px 0", fontSize: "20px", color: "#1e293b" }}>
-                Available Forms
-              </h2>
-              <p style={{ margin: 0, color: "#64748b", fontSize: "14px" }}>
-                Select any form to fill manually or auto-fill with <strong>🎤 Voice AI</strong> or <strong>📄 Document Upload</strong> (≥98% Multi-Agent Accuracy).
+              <h2 className="section-title">Available Forms</h2>
+              <p className="section-subtitle">
+                Choose a form to complete manually or fill from a document.
               </p>
             </div>
             <button
@@ -526,14 +604,14 @@ export default function UserPanel() {
               disabled={loadingForms}
               style={{ padding: "8px 16px", fontSize: "13px" }}
             >
-              {loadingForms ? "Refreshing…" : "↻ Refresh Forms"}
+              <RefreshCw size={15} aria-hidden="true" className={loadingForms ? "is-spinning" : ""} /> {loadingForms ? "Refreshing" : "Refresh forms"}
             </button>
           </div>
 
           {forms.length === 0 ? (
             <div className="no-forms-card">
-              <div className="no-forms-icon">📋</div>
-              <h3>No form available in the UI</h3>
+
+              <h3>No forms available</h3>
               <p>
                 There are currently no published forms available for you to complete.
                 When an administrator publishes a form, it will appear here automatically.
@@ -549,12 +627,12 @@ export default function UserPanel() {
                       <span className="badge-published">Published (v{form.version})</span>
                     </div>
                     <p className="form-card-desc">
-                      {form.description || "No description provided."}
+                      {form.description || "Complete all required fields and submit your application."}
                     </p>
                   </div>
                   <div>
                     <div className="form-card-meta">
-                      <span>📝 {form.fields?.length || 0} Questions</span>
+                      <span> {form.fields?.length || 0} questions</span>
                       <span>ID: <code>{form.formId}</code></span>
                     </div>
                     <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
@@ -563,42 +641,42 @@ export default function UserPanel() {
                         style={{ flex: 1 }}
                         onClick={() => handleStartForm(form)}
                       >
-                        Fill Form →
+                        Open form <ArrowRight size={16} aria-hidden="true" />
                       </button>
-                      <button
-                        type="button"
-                        className="btn-secondary"
-                        title="Fill Form with Voice AI (Multi-Agent)"
-                        aria-label="Fill Form with Voice AI"
-                        onClick={() => handleStartForm(form, "voice")}
-                        style={{
-                          padding: "10px 12px",
-                          fontSize: "16px",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          borderRadius: "8px",
-                        }}
-                      >
-                        🎤
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-secondary"
-                        title="Fill Form by Uploading Document (PDF, DOCX, Image, TXT)"
-                        aria-label="Fill Form by Uploading Document"
-                        onClick={() => handleStartForm(form, "document")}
-                        style={{
-                          padding: "10px 12px",
-                          fontSize: "16px",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          borderRadius: "8px",
-                        }}
-                      >
-                        📄
-                      </button>
+                      {isVoiceEnabled(form) && (
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          title="Fill Form by Talking Through Questions"
+                          aria-label="Fill Form by Voice Conversation"
+                          onClick={() => handleStartForm(form, "voice")}
+                          style={{
+                            padding: "10px 12px",
+                            fontSize: "16px",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            borderRadius: "8px",
+                          }}
+                        ><Mic size={17} aria-hidden="true" /></button>
+                      )}
+                      {isDocUploadEnabled(form) && (
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          title="Fill Form by Uploading Document (PDF, DOCX, Image, TXT)"
+                          aria-label="Fill Form by Uploading Document"
+                          onClick={() => handleStartForm(form, "document")}
+                          style={{
+                            padding: "10px 12px",
+                            fontSize: "16px",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            borderRadius: "8px",
+                          }}
+                        ><FileUp size={17} aria-hidden="true" /></button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -611,7 +689,7 @@ export default function UserPanel() {
       {/* Interactive Form Filler */}
       {activeTab === "forms" && activeForm && (
         <div className="panel-section">
-          {/* Hidden File Inputs for Document & Audio Upload Icons */}
+          {/* Hidden document picker */}
           <input
             ref={docInputRef}
             type="file"
@@ -620,287 +698,111 @@ export default function UserPanel() {
             style={{ display: "none" }}
             onChange={handleDocumentUploadFill}
           />
-          <input
-            ref={audioInputRef}
-            type="file"
-            accept=".webm,.wav,.mp3,.m4a,.ogg,audio/*"
-            style={{ display: "none" }}
-            onChange={handleAudioFileUpload}
-          />
 
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px", marginBottom: "20px" }}>
-            <div>
+          {/* Clean Form Workspace Header */}
+          <div className="form-workspace-header">
+            <div className="form-workspace-title-block">
               <button
-                className="btn-secondary"
+                type="button"
+                className="btn-back-link"
                 onClick={handleCancelForm}
-                style={{ padding: "6px 14px", fontSize: "13px", marginBottom: "10px" }}
               >
-                ← Back to Available Forms
+                <ArrowLeft size={15} aria-hidden="true" /> Back to forms
               </button>
-              <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                <h2 style={{ margin: "0", fontSize: "22px", color: "#1e293b" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginTop: "6px" }}>
+                <h2 style={{ margin: 0, fontSize: "22px", fontWeight: 800, color: "#ffffff" }}>
                   {activeForm.title}
                 </h2>
                 <span className="badge-published">v{activeForm.version}</span>
+                <span className="form-question-count-pill">
+                  {(activeForm.fields || []).length} questions
+                </span>
               </div>
-              <p style={{ margin: "6px 0 0 0", color: "#64748b", fontSize: "14px" }}>
-                {activeForm.description || "Complete all required fields and submit your application."}
+              <p style={{ margin: "6px 0 0 0", color: "var(--text-secondary)", fontSize: "13.5px" }}>
+                {activeForm.description || "Complete the required fields manually or fill them from a document."}
               </p>
             </div>
 
-            {/* Inline AI Smart-Fill Icon Toolbar */}
+            {/* Unified Smart-Fill Action Toolbar */}
             {!submissionSuccess && (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "10px",
-                  background: "linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%)",
-                  border: "1px solid #bfdbfe",
-                  padding: "10px 14px",
-                  borderRadius: "12px",
-                  boxShadow: "0 2px 6px rgba(37, 99, 235, 0.08)",
-                }}
-              >
-                <div style={{ marginRight: "4px" }}>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#1e40af", letterSpacing: "0.02em" }}>
-                    🤖 AI SMART-FILL
-                  </div>
-                  <div style={{ fontSize: "11px", color: "#475569" }}>
-                    Multi-Agent ≥98% Accuracy
-                  </div>
-                </div>
-
-                {/* Voice Fill Icon Button */}
+              <div className="smart-fill-toolbar">
+                {isDocUploadEnabled(activeForm) && (
+                  <button
+                    type="button"
+                    onClick={() => docInputRef.current?.click()}
+                    disabled={aiProcessing}
+                    title="Fill the form from a document (PDF, DOCX, image, or TXT)"
+                    aria-label="Fill from document"
+                    className="smart-fill-btn doc-upload"
+                  >
+                    <FileUp size={16} aria-hidden="true" /><span>Use document</span>
+                  </button>
+                )}
+                {isVoiceEnabled(activeForm) && (
+                  <button
+                    type="button"
+                    onClick={() => setShowVoiceAssistant(true)}
+                    disabled={aiProcessing}
+                    title="Fill this form by talking through each question"
+                    aria-label="Fill form by voice conversation"
+                    className="smart-fill-btn voice-conversation"
+                  >
+                    <Mic size={16} aria-hidden="true" /><span>Talk through form</span>
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => handleToggleVoiceRecording(null)}
-                  disabled={aiProcessing}
-                  title={isRecording && !recordingFieldKey ? "Stop Voice Recording" : "Fill Entire Form with Voice AI"}
-                  aria-label="Fill Form with Voice AI"
+                  onClick={handleClearForm}
+                  disabled={formSubmitting || aiProcessing}
+                  title="Clear all fields and entered text from the form"
+                  aria-label="Clear form"
+                  className="smart-fill-btn clear-form"
                   style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    padding: "8px 14px",
-                    borderRadius: "8px",
-                    border: isRecording && !recordingFieldKey ? "1px solid #ef4444" : "1px solid #3b82f6",
-                    background: isRecording && !recordingFieldKey ? "#fef2f2" : "#2563eb",
-                    color: isRecording && !recordingFieldKey ? "#dc2626" : "#ffffff",
-                    fontWeight: 600,
-                    fontSize: "13px",
-                    cursor: aiProcessing ? "not-allowed" : "pointer",
+                    borderColor: "rgba(239, 68, 68, 0.35)",
+                    background: "rgba(239, 68, 68, 0.08)",
+                    color: "#fca5a5",
                   }}
                 >
-                  <span style={{ fontSize: "16px" }}>{isRecording && !recordingFieldKey ? "⏹️" : "🎤"}</span>
-                  <span>{isRecording && !recordingFieldKey ? "Stop Voice" : "Voice Fill"}</span>
-                </button>
-
-                {/* Upload Audio Recording Icon Button */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRecordingFieldKey(null);
-                    audioInputRef.current?.click();
-                  }}
-                  disabled={aiProcessing}
-                  title="Upload Audio File (.webm, .wav, .mp3) for Voice Fill"
-                  aria-label="Upload Audio File for Voice Fill"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: "8px 10px",
-                    borderRadius: "8px",
-                    border: "1px solid #cbd5e1",
-                    background: "#ffffff",
-                    color: "#334155",
-                    fontSize: "15px",
-                    cursor: aiProcessing ? "not-allowed" : "pointer",
-                  }}
-                >
-                  🎧
-                </button>
-
-                {/* Voice Dictation Text Assistant Icon Button */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRecordingFieldKey(null);
-                    setShowVoiceTextPrompt((prev) => !prev);
-                  }}
-                  disabled={aiProcessing}
-                  title="Dictate or Paste Voice Transcript to Auto-Fill Form"
-                  aria-label="Dictate or Paste Voice Transcript"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: "8px 10px",
-                    borderRadius: "8px",
-                    border: "1px solid #cbd5e1",
-                    background: showVoiceTextPrompt ? "#dbeafe" : "#ffffff",
-                    color: "#1e40af",
-                    fontSize: "15px",
-                    cursor: aiProcessing ? "not-allowed" : "pointer",
-                  }}
-                >
-                  💬
-                </button>
-
-                {/* Document Upload Icon Button */}
-                <button
-                  type="button"
-                  onClick={() => docInputRef.current?.click()}
-                  disabled={aiProcessing}
-                  title="Upload Document (PDF, DOCX, Image, TXT) to Auto-Fill Form"
-                  aria-label="Upload Document to Auto-Fill Form"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    padding: "8px 14px",
-                    borderRadius: "8px",
-                    border: "1px solid #0f766e",
-                    background: "#0d9488",
-                    color: "#ffffff",
-                    fontWeight: 600,
-                    fontSize: "13px",
-                    cursor: aiProcessing ? "not-allowed" : "pointer",
-                  }}
-                >
-                  <span style={{ fontSize: "16px" }}>📄</span>
-                  <span>Upload Doc</span>
+                  <RotateCcw size={16} aria-hidden="true" /><span>Clear</span>
                 </button>
               </div>
             )}
           </div>
 
-          {/* Voice / Natural Language Dictation Drawer */}
-          {showVoiceTextPrompt && !submissionSuccess && (
-            <div
-              style={{
-                background: "#f8fafc",
-                border: "1px solid #cbd5e1",
-                borderRadius: "10px",
-                padding: "14px 16px",
-                marginBottom: "18px",
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                <strong style={{ fontSize: "13px", color: "#1e293b" }}>
-                  🎤 {recordingFieldKey ? `Dictate Value for '${recordingFieldKey}'` : "Voice / Natural Language Smart-Fill Assistant"}
-                </strong>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowVoiceTextPrompt(false);
-                    setRecordingFieldKey(null);
-                  }}
-                  style={{ background: "none", border: "none", cursor: "pointer", color: "#64748b", fontSize: "14px" }}
-                >
-                  ✕
-                </button>
-              </div>
-              <textarea
-                rows={2}
-                placeholder="Speak or type naturally, e.g.: 'My full name is Jane Doe, email jane.doe at example dot com, age 29, born on 1996-04-15...'"
-                value={voiceTextInput}
-                onChange={(e) => setVoiceTextInput(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "10px",
-                  borderRadius: "8px",
-                  border: "1px solid #cbd5e1",
-                  fontSize: "13px",
-                  marginBottom: "10px",
-                }}
-              />
-              <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => audioInputRef.current?.click()}
-                  disabled={aiProcessing}
-                  style={{ padding: "6px 12px", fontSize: "12px" }}
-                >
-                  🎧 Upload Audio File Instead
-                </button>
-                <button
-                  type="button"
-                  className="btn-primary"
-                  onClick={handleVoiceTextSubmit}
-                  disabled={aiProcessing || !voiceTextInput.trim()}
-                  style={{ padding: "6px 14px", fontSize: "12px" }}
-                >
-                  ✨ Run Multi-Agent Fill
-                </button>
-              </div>
-            </div>
+          {showVoiceAssistant && !submissionSuccess && isVoiceEnabled(activeForm) && (
+            <VoiceFormAssistant
+              form={activeForm}
+              values={formData}
+              language={voiceLanguage}
+              onLanguageChange={setVoiceLanguage}
+              onAnswer={handleVoiceAnswer}
+              onAudioAnswer={handleVoiceAudio}
+              onSpeak={handleAssistantSpeak}
+              onClearField={clearVoiceField}
+              onClose={() => setShowVoiceAssistant(false)}
+            />
           )}
 
           {/* Live AI Processing Banner */}
           {aiProcessing && (
             <div
-              style={{
-                background: "#eff6ff",
-                border: "1px solid #93c5fd",
-                color: "#1e40af",
-                padding: "12px 16px",
-                borderRadius: "10px",
-                marginBottom: "18px",
-                display: "flex",
-                alignItems: "center",
-                gap: "10px",
-                fontSize: "13px",
-                fontWeight: 500,
-              }}
+              role="status"
+              aria-live="polite"
+              className="ai-processing-banner"
             >
-              <span>⏳</span>
-              <span>{aiStatusText || "Multi-Agent AI pipeline processing..."}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", fontWeight: 600 }}>
+                <span>{aiStatusText || "AI is checking your answers..."}</span>
+              </div>
             </div>
           )}
 
-          {/* Multi-Agent Verification Telemetry Banner */}
+          {/* Multi-Agent Verification Result Banner */}
           {aiResultMeta && !submissionSuccess && (
-            <div
-              style={{
-                background: "#f0fdf4",
-                border: "1px solid #86efac",
-                borderRadius: "10px",
-                padding: "12px 16px",
-                marginBottom: "20px",
-                fontSize: "13px",
-                color: "#166534",
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
-                <div>
-                  <strong>✅ Multi-Agent Smart-Fill Complete:</strong> Populated{" "}
-                  <strong>{aiResultMeta.populatedCount}</strong> field(s) with{" "}
-                  <strong>{aiResultMeta.accuracyScore}% verified confidence</strong>.
-                </div>
-                <span
-                  style={{
-                    background: "#dcfce7",
-                    color: "#15803d",
-                    padding: "3px 10px",
-                    borderRadius: "999px",
-                    fontWeight: 700,
-                    fontSize: "12px",
-                  }}
-                >
-                  🎯 {aiResultMeta.accuracyScore}% Accuracy • Critic Verified
-                </span>
-              </div>
-              {aiResultMeta.transcript && (
-                <div style={{ marginTop: "6px", fontSize: "12px", color: "#15803d" }}>
-                  <strong>Transcript:</strong> <em>“{aiResultMeta.transcript}”</em>
-                </div>
-              )}
+            <div className="ai-result-banner">
+              <div><strong>AI fill complete:</strong> Populated{" "}<strong>{aiResultMeta.populatedCount}</strong> field(s).</div>
               {aiResultMeta.documents?.length > 0 && (
-                <div style={{ marginTop: "6px", fontSize: "12px", color: "#15803d" }}>
-                  <strong>Parsed Document(s):</strong>{" "}
+                <div style={{ marginTop: "6px", fontSize: "12.5px", color: "#15803d" }}>
+                  <strong>Documents:</strong>{" "}
                   {aiResultMeta.documents.map((d) => d.filename).join(", ")}
                 </div>
               )}
@@ -908,16 +810,30 @@ export default function UserPanel() {
           )}
 
           {submissionSuccess ? (
-            <div className="info-card" style={{ background: "#f0fdf4", borderColor: "#22c55e", padding: "24px" }}>
-              <div style={{ fontSize: "36px", marginBottom: "8px" }}>✅</div>
-              <h3 style={{ margin: "0 0 8px 0", color: "#15803d" }}>Application Submitted Successfully!</h3>
-              <p style={{ margin: "0 0 16px 0", color: "#166534" }}>
+            <div className="info-card" style={{ background: "rgba(255, 255, 255, 0.08)", borderColor: "rgba(255, 255, 255, 0.28)", padding: "24px" }}>
+
+              <h3 style={{ margin: "0 0 8px 0", color: "#ffffff" }}>Application Submitted Successfully!</h3>
+              <p style={{ margin: "0 0 16px 0", color: "var(--text-secondary)" }}>
                 Your submission has been received and recorded under reference ID:
                 <br />
-                <strong><code>{submissionSuccess.applicationId}</code></strong>
+                <strong><code style={{ color: "#ffffff" }}>{submissionSuccess.applicationId}</code></strong>
               </p>
-              <div style={{ display: "flex", gap: "12px" }}>
-                <button className="btn-primary" onClick={handleCancelForm}>
+              <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+                <button
+                  className="btn-primary"
+                  onClick={() => {
+                    const submittedId = submissionSuccess.applicationId;
+                    handleCancelForm();
+                    setActiveTab("submissions");
+                    fetchMySubmissions().then(() => {
+                      const found = mySubmissions.find((s) => s.applicationId === submittedId);
+                      if (found) setSelectedReviewSub(found);
+                    });
+                  }}
+                >
+                   View submission status →
+                </button>
+                <button className="btn-secondary" onClick={handleCancelForm}>
                   Return to Forms List
                 </button>
                 <button
@@ -938,209 +854,687 @@ export default function UserPanel() {
                 </div>
               )}
 
-              {(activeForm.fields || []).map((field, idx) => {
-                const key = field.fieldKey || field.name;
-                const value = formData[key] ?? (field.type === "multiselect" ? [] : "");
-                const prov = fieldProvenance[key];
-                const conf = fieldConfidence[key];
-                const isFieldRecording = isRecording && recordingFieldKey === key;
+              <div className="user-form-fields-grid">
+                {(activeForm.fields || []).map((field, idx) => {
+                  const key = field.fieldKey || field.name;
+                  const value = formData[key] ?? (field.type === "multiselect" ? [] : "");
+                  const isFilled =
+                    field.type === "multiselect"
+                      ? Array.isArray(value) && value.length > 0
+                      : field.type === "checkbox"
+                      ? Boolean(value)
+                      : value !== undefined && value !== null && String(value).trim() !== "";
 
-                return (
-                  <div key={idx} className="user-form-field">
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-                      <label htmlFor={`field-${idx}`} style={{ marginBottom: 0 }}>
-                        {field.label}
-                        {field.required && <span className="req-star">*</span>}
-                      </label>
+                  const spotlightClass = isFilled ? "field-card-populated" : "";
 
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        {prov && (
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              padding: "2px 8px",
-                              borderRadius: "999px",
-                              fontWeight: 600,
-                              background: prov.source?.startsWith("AI_") ? "#dcfce7" : "#f1f5f9",
-                              color: prov.source?.startsWith("AI_") ? "#15803d" : "#475569",
-                            }}
-                          >
-                            {prov.source === "AI_VOICE"
-                              ? `🎤 AI Voice ${conf ? `${Math.round(conf * 100)}%` : "99%"}`
-                              : prov.source === "AI_DOCUMENT"
-                              ? `📄 AI Doc ${conf ? `${Math.round(conf * 100)}%` : "99%"}`
-                              : "✏️ Edited"}
+                  return (
+                    <div
+                      key={idx}
+                      className={`user-form-field ${spotlightClass}`}
+                    >
+                      <div className="field-card-top-row">
+                        <div className="field-label-group">
+                          <span className={`field-index-badge ${isFilled ? "done" : ""}`}>
+                            {isFilled ? "✓" : idx + 1}
                           </span>
-                        )}
+                          <label htmlFor={`field-${idx}`} style={{ marginBottom: 0 }}>
+                            {field.label}
+                            {field.required && <span className="req-star">*</span>}
+                          </label>
+                          <span className="field-type-chip">{field.type}</span>
+                        </div>
 
-                        {field.type !== "file" && (
-                          <button
-                            type="button"
-                            onClick={() => handleToggleVoiceRecording(key)}
-                            disabled={aiProcessing}
-                            title={`Dictate '${field.label}' with Voice AI`}
-                            aria-label={`Dictate ${field.label} with Voice AI`}
-                            style={{
-                              background: isFieldRecording ? "#fee2e2" : "#f8fafc",
-                              border: isFieldRecording ? "1px solid #ef4444" : "1px solid #cbd5e1",
-                              color: isFieldRecording ? "#dc2626" : "#334155",
-                              borderRadius: "6px",
-                              padding: "3px 8px",
-                              fontSize: "13px",
-                              cursor: aiProcessing ? "not-allowed" : "pointer",
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: "4px",
-                            }}
-                          >
-                            <span>{isFieldRecording ? "⏹️" : "🎤"}</span>
-                          </button>
-                        )}
                       </div>
-                    </div>
 
-                    {field.type === "dropdown" ? (
-                      <select
-                        id={`field-${idx}`}
-                        value={value}
-                        required={field.required}
-                        onChange={(e) => handleManualFieldChange(key, e.target.value)}
-                      >
-                        <option value="">-- Select an option --</option>
-                        {(field.validation?.options || []).map((opt, oIdx) => (
-                          <option key={oIdx} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-                    ) : field.type === "multiselect" ? (
-                      <div
-                        style={{
-                          display: "flex",
-                          flexWrap: "wrap",
-                          gap: "10px",
-                          padding: "10px 12px",
-                          border: "1px solid #cbd5e1",
-                          borderRadius: "8px",
-                          background: "#ffffff",
-                        }}
-                      >
-                        {(field.validation?.options || []).map((opt, oIdx) => {
-                          const selectedList = Array.isArray(value) ? value : [];
-                          const checked = selectedList.includes(opt);
-                          return (
-                            <label
-                              key={oIdx}
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "6px",
-                                fontSize: "13px",
-                                fontWeight: 500,
-                                color: "#1e293b",
-                                cursor: "pointer",
-                              }}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={(e) => {
-                                  const next = e.target.checked
-                                    ? [...selectedList, opt]
-                                    : selectedList.filter((item) => item !== opt);
-                                  handleManualFieldChange(key, next);
-                                }}
-                              />
-                              <span>{opt}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    ) : field.type === "checkbox" ? (
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      {field.type === "dropdown" ? (
+                        <select
+                          id={`field-${idx}`}
+                          value={value}
+                          required={field.required}
+                          onChange={(e) => handleManualFieldChange(key, e.target.value)}
+                        >
+                          <option value="">-- Select an option --</option>
+                          {(field.validation?.options || []).map((opt, oIdx) => (
+                            <option key={oIdx} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      ) : field.type === "multiselect" ? (
+                        <div className="field-multiselect-group">
+                          {(field.validation?.options || []).map((opt, oIdx) => {
+                            const selectedList = Array.isArray(value) ? value : [];
+                            const checked = selectedList.includes(opt);
+                            return (
+                              <label
+                                key={oIdx}
+                                className={`multiselect-chip-label ${checked ? "checked" : ""}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={(e) => {
+                                    const next = e.target.checked
+                                      ? [...selectedList, opt]
+                                      : selectedList.filter((item) => item !== opt);
+                                    handleManualFieldChange(key, next);
+                                  }}
+                                />
+                                <span>{opt}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ) : field.type === "checkbox" ? (
+                        <label className="checkbox-row-label" htmlFor={`field-${idx}`}>
+                          <input
+                            id={`field-${idx}`}
+                            type="checkbox"
+                            checked={Boolean(formData[key])}
+                            onChange={(e) => handleManualFieldChange(key, e.target.checked)}
+                          />
+                          <span>Yes, I confirm {field.label}</span>
+                        </label>
+                      ) : field.type === "email" ? (
                         <input
                           id={`field-${idx}`}
-                          type="checkbox"
-                          checked={Boolean(formData[key])}
-                          onChange={(e) => handleManualFieldChange(key, e.target.checked)}
+                          type="email"
+                          placeholder="name@example.com"
+                          value={value}
+                          required={field.required}
+                          pattern="^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+                          title="Must be a valid email containing '@' and a domain"
+                          onChange={(e) => handleManualFieldChange(key, e.target.value)}
                         />
-                        <span style={{ fontSize: "14px", color: "#64748b" }}>{field.label}</span>
-                      </div>
-                    ) : field.type === "email" ? (
-                      <input
-                        id={`field-${idx}`}
-                        type="email"
-                        placeholder="name@example.com"
-                        value={value}
-                        required={field.required}
-                        pattern="^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
-                        title="Must be a valid email containing '@' and a domain"
-                        onChange={(e) => handleManualFieldChange(key, e.target.value)}
-                      />
-                    ) : field.type === "number" ? (
-                      <input
-                        id={`field-${idx}`}
-                        type="number"
-                        placeholder="Enter number"
-                        value={value}
-                        required={field.required}
-                        min={field.validation?.min}
-                        max={field.validation?.max}
-                        onChange={(e) => handleManualFieldChange(key, e.target.value)}
-                      />
-                    ) : field.type === "date" ? (
-                      <input
-                        id={`field-${idx}`}
-                        type="date"
-                        value={value}
-                        required={field.required}
-                        onChange={(e) => handleManualFieldChange(key, e.target.value)}
-                      />
-                    ) : field.type === "file" ? (
-                      <input
-                        id={`field-${idx}`}
-                        type="file"
-                        required={field.required && !value}
-                        onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          handleManualFieldChange(key, f ? f.name : "");
-                        }}
-                      />
-                    ) : (
-                      <input
-                        id={`field-${idx}`}
-                        type="text"
-                        placeholder={`Enter ${field.label.toLowerCase()}`}
-                        value={value}
-                        required={field.required}
-                        pattern={field.validation?.regex}
-                        onChange={(e) => handleManualFieldChange(key, e.target.value)}
-                      />
-                    )}
-                  </div>
-                );
-              })}
+                      ) : field.type === "number" ? (
+                        <input
+                          id={`field-${idx}`}
+                          type="number"
+                          placeholder={
+                            field.validation?.min !== undefined && field.validation?.max !== undefined
+                              ? `Enter number (${field.validation.min} – ${field.validation.max})`
+                              : "Enter number"
+                          }
+                          value={value}
+                          required={field.required}
+                          min={field.validation?.min}
+                          max={field.validation?.max}
+                          onChange={(e) => handleManualFieldChange(key, e.target.value)}
+                        />
+                      ) : field.type === "date" ? (
+                        <input
+                          id={`field-${idx}`}
+                          type="date"
+                          value={value}
+                          required={field.required}
+                          onChange={(e) => handleManualFieldChange(key, e.target.value)}
+                        />
+                      ) : field.type === "file" ? (
+                        <input
+                          id={`field-${idx}`}
+                          type="file"
+                          required={field.required && !value}
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            handleManualFieldChange(key, f ? f.name : "");
+                          }}
+                        />
+                      ) : (
+                        <input
+                          id={`field-${idx}`}
+                          type="text"
+                          placeholder={`Enter ${field.label.toLowerCase()}`}
+                          value={value}
+                          required={field.required}
+                          pattern={field.validation?.regex}
+                          onChange={(e) => handleManualFieldChange(key, e.target.value)}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
 
-              <div style={{ display: "flex", gap: "12px", marginTop: "24px" }}>
+              <div className="form-submit-footer">
                 <button
                   type="submit"
                   className="btn-primary"
                   disabled={formSubmitting || aiProcessing}
-                  style={{ padding: "12px 28px" }}
+                  style={{ padding: "12px 28px", fontSize: "15px" }}
                 >
-                  {formSubmitting ? "Submitting Application…" : "Submit Application"}
+                  {formSubmitting ? "Submitting application…" : <><Send size={16} aria-hidden="true" /> Submit application</>}
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={formSubmitting || aiProcessing}
+                  onClick={handleClearForm}
+                  title="Clear all fields and entered text from the form"
+                  style={{
+                    padding: "12px 20px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    borderColor: "rgba(239, 68, 68, 0.35)",
+                    color: "#fca5a5",
+                  }}
+                >
+                  <RotateCcw size={15} aria-hidden="true" /> Clear
                 </button>
                 <button
                   type="button"
                   className="btn-secondary"
                   disabled={formSubmitting}
                   onClick={handleCancelForm}
+                  style={{ padding: "12px 20px" }}
                 >
                   Cancel
                 </button>
               </div>
             </form>
           )}
+        </div>
+      )}
+
+      {/* ── User Submitted Forms & Status Review Panel ── */}
+      {activeTab === "submissions" && (
+        <div className="panel-section">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", marginBottom: "20px" }}>
+            <div>
+              <h2 style={{ margin: "0 0 4px 0", fontSize: "20px", color: "#ffffff" }}>
+                Submissions
+              </h2>
+              <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: "14px" }}>
+                Track real-time review status (<strong>Submitted → Under Review → Approved / Rejected</strong>) and inspect your submitted responses.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={fetchMySubmissions}
+              disabled={loadingSubmissions}
+              style={{ padding: "8px 16px", fontSize: "13px" }}
+            >
+              <RefreshCw size={15} aria-hidden="true" className={loadingSubmissions ? "is-spinning" : ""} />
+              {loadingSubmissions ? "Refreshing status" : "Refresh status"}
+            </button>
+          </div>
+
+          {/* Interactive Status Summary KPI Cards */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+              gap: "12px",
+              marginBottom: "20px",
+            }}
+          >
+            {[
+              { key: "ALL", label: "Total Submitted", count: submissionMetrics.total, color: "#ffffff", bg: "rgba(255, 255, 255, 0.08)", border: "rgba(255, 255, 255, 0.2)" },
+              { key: "SUBMITTED", label: "Submitted", count: submissionMetrics.submitted, color: "#f4f4f5", bg: "rgba(255, 255, 255, 0.08)", border: "rgba(255, 255, 255, 0.2)" },
+              { key: "UNDER_REVIEW", label: "Under Review", count: submissionMetrics.underReview, color: "#d4d4d8", bg: "rgba(255, 255, 255, 0.08)", border: "rgba(255, 255, 255, 0.2)" },
+              { key: "APPROVED", label: "Approved", count: submissionMetrics.approved, color: "#ffffff", bg: "rgba(255, 255, 255, 0.12)", border: "rgba(255, 255, 255, 0.35)" },
+              { key: "REJECTED", label: "Rejected", count: submissionMetrics.rejected, color: "#fca5a5", bg: "rgba(255, 255, 255, 0.06)", border: "rgba(248, 113, 113, 0.3)" },
+            ].map((card) => {
+              const isSelected = subStatusFilter === card.key;
+              return (
+                <button
+                  key={card.key}
+                  type="button"
+                  onClick={() => setSubStatusFilter(card.key)}
+                  style={{
+                    textAlign: "left",
+                    padding: "14px 16px",
+                    borderRadius: "12px",
+                    background: card.bg,
+                    border: isSelected ? `2px solid ${card.color}` : `1px solid ${card.border}`,
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-secondary)", marginBottom: "4px" }}>
+                    {card.label}
+                  </div>
+                  <div style={{ fontSize: "24px", fontWeight: 800, color: card.color }}>
+                    {card.count}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Search & Filter Toolbar */}
+          <div
+            style={{
+              display: "flex",
+              gap: "10px",
+              flexWrap: "wrap",
+              marginBottom: "20px",
+              padding: "12px",
+              background: "rgba(255, 255, 255, 0.05)",
+              border: "1px solid rgba(255, 255, 255, 0.14)",
+              borderRadius: "12px",
+            }}
+          >
+            <input
+              type="text"
+              placeholder=" Search by Reference ID, Form Title, or Answer..."
+              value={subSearchQuery}
+              onChange={(e) => setSubSearchQuery(e.target.value)}
+              style={{
+                flex: "1 1 240px",
+                padding: "10px 14px",
+                borderRadius: "10px",
+                border: "1px solid rgba(255, 255, 255, 0.20)",
+                background: "rgba(14, 16, 22, 0.72)",
+                color: "#ffffff",
+                fontSize: "13px",
+              }}
+            />
+            <select
+              aria-label="Filter by Status"
+              value={subStatusFilter}
+              onChange={(e) => setSubStatusFilter(e.target.value)}
+              style={{
+                padding: "10px 14px",
+                borderRadius: "10px",
+                border: "1px solid rgba(255, 255, 255, 0.20)",
+                background: "rgba(14, 16, 22, 0.72)",
+                color: "#ffffff",
+                fontSize: "13px",
+              }}
+            >
+              <option value="ALL">All Statuses</option>
+              <option value="SUBMITTED">Submitted</option>
+              <option value="UNDER_REVIEW">Under Review</option>
+              <option value="APPROVED">Approved</option>
+              <option value="REJECTED">Rejected</option>
+            </select>
+            <select
+              aria-label="Filter by Form"
+              value={subFormFilter}
+              onChange={(e) => setSubFormFilter(e.target.value)}
+              style={{
+                padding: "10px 14px",
+                borderRadius: "10px",
+                border: "1px solid rgba(255, 255, 255, 0.20)",
+                background: "rgba(14, 16, 22, 0.72)",
+                color: "#ffffff",
+                fontSize: "13px",
+              }}
+            >
+              <option value="ALL">All Forms</option>
+              {forms.map((f) => (
+                <option key={f.formId} value={f.formId}>
+                  {f.title}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Submissions List */}
+          {loadingSubmissions ? (
+            <div style={{ padding: "32px", textAlign: "center", color: "var(--text-secondary)" }}>
+              Loading your submitted forms…
+            </div>
+          ) : filteredMySubmissions.length === 0 ? (
+            <div className="no-forms-card">
+
+              <h3>No submitted forms found</h3>
+              <p>
+                {mySubmissions.length === 0
+                  ? "You haven't submitted any forms yet. Go to Available Forms to fill and submit your first form."
+                  : "No submissions match your current search or status filter."}
+              </p>
+              {mySubmissions.length === 0 && (
+                <button
+                  type="button"
+                  className="btn-primary"
+                  style={{ marginTop: "12px" }}
+                  onClick={() => setActiveTab("forms")}
+                >
+                  Browse Available Forms →
+                </button>
+              )}
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              {filteredMySubmissions.map((sub) => {
+                const statusCfg = USER_STATUS_CONFIG[sub.status] || USER_STATUS_CONFIG.SUBMITTED;
+                const answerEntries = Object.entries(sub.data || {});
+                const isFinalApproved = sub.status === "APPROVED";
+                const isFinalRejected = sub.status === "REJECTED";
+                const step = statusCfg.step;
+
+                return (
+                  <div
+                    key={sub.applicationId}
+                    style={{
+                      background: "var(--glass-hero-bg)",
+                      border: "var(--glass-hero-border)",
+                      borderLeft: "4px solid rgba(255, 255, 255, 0.65)",
+                      borderRadius: "20px",
+                      padding: "20px 22px",
+                      boxShadow: "var(--glass-hero-shadow)",
+                      backdropFilter: "var(--glass-hero-blur)",
+                      WebkitBackdropFilter: "var(--glass-hero-blur)",
+                    }}
+                  >
+                    {/* Card Top Row: Form Title + Status Pill */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px", marginBottom: "12px" }}>
+                      <div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                          <h3 style={{ margin: 0, fontSize: "17px", color: "#ffffff" }}>
+                            {sub.formTitle || sub.formId}
+                          </h3>
+                          <span className="badge-published">v{sub.formVersion}</span>
+                        </div>
+                        <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px", display: "flex", gap: "14px", flexWrap: "wrap" }}>
+                          <span>
+                            Ref ID: <code style={{ color: "#ffffff", fontWeight: 600 }}>{sub.applicationId}</code>
+                          </span>
+                          <span>
+                             Submitted: {sub.submittedAt ? new Date(sub.submittedAt).toLocaleString() : "N/A"}
+                          </span>
+                          {sub.updatedAt && sub.updatedAt !== sub.submittedAt && (
+                            <span>
+                               Updated: {new Date(sub.updatedAt).toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Semantic Status Badge */}
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          padding: "6px 14px",
+                          borderRadius: "999px",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          background: statusCfg.bg,
+                          color: statusCfg.color,
+                          border: `1px solid ${statusCfg.border}`,
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: "8px",
+                            height: "8px",
+                            borderRadius: "50%",
+                            background: statusCfg.dot,
+                          }}
+                        />
+                        {statusCfg.label}
+                      </span>
+                    </div>
+
+                    {/* 3-Step Visual Application Status Tracker */}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        background: "rgba(255, 255, 255, 0.05)",
+                        border: "1px solid rgba(255, 255, 255, 0.14)",
+                        borderRadius: "8px",
+                        padding: "10px 14px",
+                        marginBottom: "14px",
+                        fontSize: "12px",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <span style={{ fontWeight: 700, color: step >= 1 ? "#ffffff" : "var(--text-muted)" }}>
+                        Submitted
+                      </span>
+                      <span style={{ color: "rgba(255, 255, 255, 0.3)" }}>───</span>
+                      <span style={{ fontWeight: 700, color: step >= 2 ? "#ffffff" : "var(--text-muted)" }}>
+                        Under review
+                      </span>
+                      <span style={{ color: "rgba(255, 255, 255, 0.3)" }}>───</span>
+                      <span
+                        style={{
+                          fontWeight: 700,
+                          color: isFinalApproved ? "#ffffff" : isFinalRejected ? "#fca5a5" : "var(--text-muted)",
+                        }}
+                      >
+                        {isFinalApproved
+                          ? " Approved"
+                          : isFinalRejected
+                          ? " Rejected"
+                          : "3. Final Decision Pending"}
+                      </span>
+                      <span style={{ marginLeft: "auto", color: "var(--text-secondary)", fontSize: "12px" }}>
+                        {statusCfg.desc}
+                      </span>
+                    </div>
+
+                    {/* Preview of Submitted Answers */}
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+                        gap: "8px",
+                        marginBottom: "14px",
+                      }}
+                    >
+                      {answerEntries.slice(0, 4).map(([k, v]) => (
+                        <div
+                          key={k}
+                          style={{
+                            background: "rgba(255, 255, 255, 0.05)",
+                            border: "1px solid rgba(255, 255, 255, 0.12)",
+                            borderRadius: "8px",
+                            padding: "8px 10px",
+                            fontSize: "12px",
+                          }}
+                        >
+                          <div style={{ color: "var(--text-secondary)", fontWeight: 600, marginBottom: "2px" }}>
+                            {getFieldLabel(sub.formId, k)}
+                          </div>
+                          <div style={{ color: "#ffffff", fontWeight: 500, wordBreak: "break-word" }}>
+                            {Array.isArray(v) ? v.join(", ") : String(v ?? "—")}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Action Bar */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+                      <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                        {answerEntries.length} field(s) recorded
+                      </span>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          style={{ padding: "7px 14px", fontSize: "12px" }}
+                          onClick={() => setSelectedReviewSub(sub)}
+                        >
+                           Review submission
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Detailed Form & Status Review Modal */}
+          {selectedReviewSub && (() => {
+            const sub = selectedReviewSub;
+            const statusCfg = USER_STATUS_CONFIG[sub.status] || USER_STATUS_CONFIG.SUBMITTED;
+            const provMap = sub.provenance || {};
+            const targetForm = forms.find((f) => f.formId === sub.formId);
+
+            return (
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label="Review Submitted Form"
+                onClick={() => setSelectedReviewSub(null)}
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  background: "rgba(8, 9, 12, 0.75)",
+                  backdropFilter: "blur(24px)",
+                  WebkitBackdropFilter: "blur(24px)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 1000,
+                  padding: "20px",
+                }}
+              >
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    background: "var(--glass-tier3-bg)",
+                    border: "var(--glass-tier3-border)",
+                    borderRadius: "26px",
+                    maxWidth: "760px",
+                    width: "100%",
+                    maxHeight: "88vh",
+                    overflowY: "auto",
+                    padding: "28px",
+                    boxShadow: "var(--glass-tier3-shadow)",
+                    backdropFilter: "var(--glass-tier3-blur)",
+                    WebkitBackdropFilter: "var(--glass-tier3-blur)",
+                    color: "#ffffff",
+                  }}
+                >
+                  {/* Modal Header */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", marginBottom: "16px" }}>
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                        <h3 style={{ margin: 0, fontSize: "20px", color: "#ffffff" }}>
+                          {sub.formTitle || sub.formId}
+                        </h3>
+                        <span className="badge-published">v{sub.formVersion}</span>
+                      </div>
+                      <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>
+                        Reference ID: <code style={{ color: "#ffffff" }}>{sub.applicationId}</code> • Submitted:{" "}
+                        {sub.submittedAt ? new Date(sub.submittedAt).toLocaleString() : "N/A"}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedReviewSub(null)}
+                      style={{
+                        background: "rgba(255, 255, 255, 0.1)",
+                        border: "1px solid rgba(255, 255, 255, 0.2)",
+                        borderRadius: "8px",
+                        padding: "6px 10px",
+                        cursor: "pointer",
+                        fontSize: "14px",
+                        color: "#ffffff",
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  {/* Current Status Banner */}
+                  <div
+                    style={{
+                      background: statusCfg.bg,
+                      border: `1px solid ${statusCfg.border}`,
+                      borderRadius: "12px",
+                      padding: "14px 16px",
+                      marginBottom: "20px",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px", marginBottom: "6px" }}>
+                      <strong style={{ color: statusCfg.color, fontSize: "14px" }}>
+                        Current Application Status: {statusCfg.label}
+                      </strong>
+                      {sub.updatedAt && (
+                        <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
+                          Last status check: {new Date(sub.updatedAt).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: "13px", color: "var(--text-secondary)" }}>{statusCfg.desc}</div>
+                  </div>
+
+                  {/* Submitted questions & Answers Table */}
+                  <h4 style={{ margin: "0 0 12px 0", fontSize: "14px", color: "#ffffff", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                    Submitted Form Responses
+                  </h4>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "20px" }}>
+                    {Object.entries(sub.data || {}).map(([fieldKey, val]) => {
+                      const label = getFieldLabel(sub.formId, fieldKey);
+                      const provEntry = provMap[fieldKey] || provMap[`/${fieldKey}`];
+                      const provSource = provEntry?.source || "";
+
+                      return (
+                        <div
+                          key={fieldKey}
+                          style={{
+                            padding: "12px 14px",
+                            borderRadius: "10px",
+                            border: "1px solid rgba(255, 255, 255, 0.14)",
+                            background: "rgba(255, 255, 255, 0.05)",
+                          }}
+                        >
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                            <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--text-secondary)" }}>
+                              {label}
+                            </span>
+                            {provSource && (
+                              <span
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "2px 8px",
+                                  borderRadius: "999px",
+                                  fontWeight: 600,
+                                  background: "rgba(255, 255, 255, 0.12)",
+                                  color: "#ffffff",
+                                  border: "1px solid rgba(255, 255, 255, 0.2)",
+                                }}
+                              >
+                                {provSource.startsWith("AI_") ? " AI assisted" : " Manual / Manually edited"}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: "14px", fontWeight: 600, color: "#ffffff", wordBreak: "break-word" }}>
+                            {Array.isArray(val) ? val.join(", ") : String(val ?? "—")}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Modal Footer Actions */}
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", flexWrap: "wrap" }}>
+                    {targetForm && (
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        onClick={() => {
+                          setSelectedReviewSub(null);
+                          setActiveTab("forms");
+                          handleStartForm(targetForm);
+                        }}
+                      >
+                         Submit New Response for This Form
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={() => setSelectedReviewSub(null)}
+                    >
+                      Close Review
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 

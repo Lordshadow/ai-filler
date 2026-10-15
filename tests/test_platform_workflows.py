@@ -6,12 +6,24 @@ Integration and workflow test suite for:
 4. Submission Service (SubmissionService) - with Schema Execution & Idempotency
 """
 
+import asyncio
+import importlib
 import uuid
+from types import SimpleNamespace
+
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from ai_filler.main import app
+
+main_module = importlib.import_module("ai_filler.main")
 from ai_filler.auth.service import create_super_admin, create_organization_admin
+from ai_filler.groq_client import (
+    build_voice_transcription_prompt,
+    synthesize_english_speech,
+    transcribe_audio,
+)
 
 client = TestClient(app)
 
@@ -74,6 +86,96 @@ def test_setup():
         "admin_headers": admin_headers,
         "user_headers": user_headers,
     }
+
+
+
+
+def test_form_fill_uploads_enforce_size_limit(monkeypatch):
+    monkeypatch.setattr(main_module, "MAX_UPLOAD_BYTES", 4)
+    async def save_oversized_upload():
+        async def read(_size):
+            return b"12345"
+        upload = SimpleNamespace(filename="profile.pdf", read=read)
+        await main_module._save_document_upload_to_temp(upload)
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(save_oversized_upload())
+    assert error.value.status_code == 413
+
+
+def test_browser_audio_upload_checks_signature_and_size(monkeypatch, tmp_path):
+    valid_webm = b"\x1aE\xdf\xa3audio"
+    audio_path = tmp_path / "answer.webm"
+    audio_path.write_bytes(valid_webm)
+    assert main_module._audio_signature_matches(audio_path, ".webm")
+    assert not main_module._audio_signature_matches(audio_path, ".wav")
+
+    monkeypatch.setattr(main_module, "MAX_UPLOAD_BYTES", 4)
+
+    async def save_oversized_audio():
+        async def read(_size):
+            return valid_webm
+
+        upload = SimpleNamespace(filename="answer.webm", read=read)
+        await main_module._save_voice_upload_to_temp(upload)
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(save_oversized_audio())
+    assert error.value.status_code == 413
+
+
+def test_voice_transcription_prompt_stays_within_whisper_budget():
+    prompt = build_voice_transcription_prompt(
+        form_title="A very long form title " * 30,
+        field_label="Full legal name " * 30,
+        options=["Engineering", "Sales", "Finance"],
+    )
+    assert len(prompt) <= 450
+    assert prompt.startswith("Transcribe faithfully; do not translate.")
+    assert "do not translate" in prompt
+    assert "Tanglish" in prompt
+
+
+def test_groq_voice_clients_use_configured_models_without_network(tmp_path):
+    calls = {}
+
+    class FakeTranscriptions:
+        def create(self, **kwargs):
+            calls["transcription"] = kwargs
+            return "தமிழ் Tanglish answer. Thank you for watching."
+
+    class FakeSpeech:
+        def create(self, **kwargs):
+            calls["speech"] = kwargs
+            return SimpleNamespace(content=b"RIFFaudio")
+
+    fake_client = SimpleNamespace(
+        audio=SimpleNamespace(
+            transcriptions=FakeTranscriptions(),
+            speech=FakeSpeech(),
+        )
+    )
+    recording = tmp_path / "answer.webm"
+    recording.write_bytes(b"\x1aE\xdf\xa3audio")
+
+    transcript = transcribe_audio(
+        file_path=str(recording), language=None, prompt="Form answer context", client=fake_client
+    )
+    speech = synthesize_english_speech(text="What is your name?", voice="hannah", client=fake_client)
+
+    assert transcript == "தமிழ் Tanglish answer."
+    assert calls["transcription"]["model"] == "whisper-large-v3"
+    assert calls["transcription"]["language"] is None
+    assert calls["transcription"]["temperature"] == 0.0
+    assert calls["speech"]["model"] == "canopylabs/orpheus-v1-english"
+    assert calls["speech"]["voice"] == "hannah"
+    assert calls["speech"]["input"] == "What is your name?"
+    assert speech == b"RIFFaudio"
+
+    synthesize_english_speech(text="x" * 200, voice="hannah", client=fake_client)
+    assert len(calls["speech"]["input"]) == 200
+    with pytest.raises(ValueError):
+        synthesize_english_speech(text="x" * 201, voice="hannah", client=fake_client)
 
 
 # ── 1. User Management Service Tests ────────────────────────────────────
@@ -258,17 +360,16 @@ def test_draft_autosave_provenance_and_occ_conflict(test_setup):
     assert save_resp_1.headers["ETag"] == 'W/"v1"'
     assert save_resp_1.json()["draft"]["version"] == 1
 
-    # 2. Subsequent autosave from Voice input with ETag If-Match: W/"v1" -> advances to v2
+    # 2. Subsequent autosave with ETag If-Match: W/"v1" -> advances to v2
     draft_payload_2 = {
         "form_id": form_id,
         "form_version": 1,
-        "data": {"sample": "Corrected via Voice"},
+        "data": {"sample": "Corrected manually"},
         "provenance": {
             "/sample": {
-                "source": "voice",
+                "source": "manual",
                 "confidence": 0.91,
-                "sourceRef": "audio_stream_44",
-                "capturedAt": "2026-10-09T05:01:00Z",
+                                "capturedAt": "2026-10-09T05:01:00Z",
                 "verifiedByUser": False,
             }
         },
@@ -981,7 +1082,7 @@ def test_multi_agent_admin_form_generation_and_user_form_filling(test_setup, mon
     assert create_form_resp.status_code == 201
     published_fields = create_form_resp.json()["form"]["fields"]
 
-    # 3. User fills the form using Multi-Agent Voice/Text endpoint (/ai/fill-form/text)
+    # 3. User fills the form using Multi-Agent text endpoint (/ai/fill-form/text)
     spoken_dictation = (
         "Full Legal Name: Alex Rivera\n"
         "Contact Email: alex.rivera at techcorp dot io\n"
@@ -996,7 +1097,7 @@ def test_multi_agent_admin_form_generation_and_user_form_filling(test_setup, mon
             "text": spoken_dictation,
             "fields": published_fields,
             "form_title": gen_data["title"],
-            "source_type": "AI_VOICE",
+            "source_type": "AI_TEXT",
         },
         headers=user_headers,
     )
@@ -1057,3 +1158,468 @@ def test_multi_agent_admin_form_generation_and_user_form_filling(test_setup, mon
     )
     assert sub_resp.status_code == 201
     assert sub_resp.json()["application"]["status"] == "SUBMITTED"
+
+
+
+
+def test_tamil_slang_and_tanglish_multi_agent_form_filling(test_setup, monkeypatch):
+    import json as _json
+
+    user_headers = test_setup["user_headers"]
+    monkeypatch.setattr("ai_filler.agents.form_agents._invoke_structured_json", lambda *args, **kwargs: None)
+
+    fields = [
+        {"fieldKey": "full_name", "label": "Full Legal Name", "type": "text", "required": True},
+        {"fieldKey": "contact_email", "label": "Contact Email", "type": "email", "required": True},
+        {"fieldKey": "age", "label": "Applicant Age", "type": "number", "required": False},
+        {"fieldKey": "dob", "label": "Date of Birth", "type": "date", "required": False},
+        {
+            "fieldKey": "department",
+            "label": "Department",
+            "type": "dropdown",
+            "required": True,
+            "validation": {"options": ["Engineering", "Sales", "Marketing", "HR"]},
+        },
+        {
+            "fieldKey": "skills",
+            "label": "Core Skills",
+            "type": "multiselect",
+            "required": False,
+            "validation": {"options": ["Python", "React", "SQL", "Docker"]},
+        },
+    ]
+
+    # 1. Colloquial Tanglish / Tamil Slang text input (including mid-sentence "illa illa" self-correction)
+    tanglish_slang_dictation = (
+        "Machi en peru Karthik Kumar da\n"
+        "en email vandhu karthik dot kumar at gmail dot com\n"
+        "en vayasu vandhu 25 illa illa iruvathi ettu\n"
+        "pirantha thethi: 15 august 1998\n"
+        "department vandhu sales illa engineering la irukken\n"
+        "skills vandhu Python-um React-um theriyum pa\n"
+    )
+
+    resp = client.post(
+        "/ai/fill-form/text",
+        json={
+            "text": tanglish_slang_dictation,
+            "fields": fields,
+            "form_title": "Employee Onboarding",
+            "source_type": "AI_TEXT",
+        },
+        headers=user_headers,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    extracted = data["fields"]
+    assert extracted["full_name"] == "Karthik Kumar"
+    assert extracted["contact_email"] == "karthik.kumar@gmail.com"
+    assert extracted["age"] == 28
+    assert extracted["dob"] == "1998-08-15"
+    assert extracted["department"] == "Engineering"
+    assert set(extracted["skills"]) == {"Python", "React"}
+
+    # 2. Native Tamil script text input
+    tamil_script_dictation = (
+        "என் பெயர்: கார்த்திக் குமார்\n"
+        "மின்னஞ்சல்: karthik.kumar@gmail.com\n"
+        "வயது: இருபத்தி எட்டு\n"
+        "பிறந்த தேதி: 15 ஆகஸ்ட் 1998\n"
+        "துறை: பொறியியல்\n"
+        "திறன்கள்: பைதான் மற்றும் ரியாக்ட்\n"
+    )
+    resp_ta = client.post(
+        "/ai/fill-form/text",
+        json={
+            "text": tamil_script_dictation,
+            "fields": fields,
+            "form_title": "Employee Onboarding",
+            "source_type": "AI_TEXT",
+        },
+        headers=user_headers,
+    )
+    assert resp_ta.status_code == 200
+    extracted_ta = resp_ta.json()["fields"]
+    assert extracted_ta["full_name"] == "கார்த்திக் குமார்"
+    assert extracted_ta["contact_email"] == "karthik.kumar@gmail.com"
+    assert extracted_ta["age"] == 28
+    assert extracted_ta["dob"] == "1998-08-15"
+    assert extracted_ta["department"] == "Engineering"
+    assert set(extracted_ta["skills"]) == {"Python", "React"}
+
+
+
+def test_tamil_slang_admin_form_schema_generation(test_setup, monkeypatch):
+    admin_headers = test_setup["admin_headers"]
+    monkeypatch.setattr("ai_filler.agents.form_agents._invoke_structured_json", lambda *args, **kwargs: None)
+
+    tanglish_schema_prompt = (
+        "Create a Candidate Application form with Full Name, Email Address, "
+        "Vayasu, Department dropdown with Engineering, Sales, HR, "
+        "and Skills multiselect with Python, React, SQL"
+    )
+    resp = client.post(
+        "/ai/generate-form/text",
+        json={
+            "text": tanglish_schema_prompt,
+            "source_type": "AI_TEXT",
+        },
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    schema = resp.json()
+    assert schema["accuracy_score"] >= 98.0
+    field_types = {f["fieldKey"]: f["type"] for f in schema["fields"]}
+    assert "email" in field_types.values()
+    assert "number" in field_types.values()
+    assert "dropdown" in field_types.values()
+    assert "multiselect" in field_types.values()
+
+
+def test_user_form_review_and_status_tracking(test_setup):
+    admin_headers = test_setup["admin_headers"]
+    user_headers = test_setup["user_headers"]
+    form_id = f"frm_status_track_{uuid.uuid4().hex[:6]}"
+
+    # 1. Admin creates and publishes a form
+    create_resp = client.post(
+        "/forms",
+        json={
+            "form_id": form_id,
+            "title": "Scholarship Review Form",
+            "description": "Trackable application form",
+            "publish": True,
+            "fields": [
+                {"fieldKey": "applicant_name", "label": "Applicant Name", "type": "text", "required": True},
+                {"fieldKey": "email", "label": "Email Address", "type": "email", "required": True},
+            ],
+        },
+        headers=admin_headers,
+    )
+    assert create_resp.status_code == 201
+
+    # 2. User submits the form with AI text assistance provenance
+    sub_resp = client.post(
+        "/applications",
+        json={
+            "form_id": form_id,
+            "form_version": 1,
+            "data": {"applicant_name": "Karthik Raja", "email": "karthik.raja@example.com"},
+            "provenance": {
+                "applicant_name": {"source": "AI_TEXT", "confidence": 0.99},
+                "email": {"source": "AI_DOCUMENT", "confidence": 0.98},
+            },
+        },
+        headers={**user_headers, "Idempotency-Key": str(uuid.uuid4())},
+    )
+    assert sub_resp.status_code == 201
+    app_id = sub_resp.json()["application"]["applicationId"]
+
+    # 3. User reviews their submitted forms list (GET /applications) -> status is SUBMITTED & provenance is included
+    user_list_resp = client.get("/applications", headers=user_headers)
+    assert user_list_resp.status_code == 200
+    my_apps = user_list_resp.json()["applications"]
+    my_sub = next((a for a in my_apps if a["applicationId"] == app_id), None)
+    assert my_sub is not None
+    assert my_sub["formTitle"] == "Scholarship Review Form"
+    assert my_sub["status"] == "SUBMITTED"
+    assert my_sub["data"]["applicant_name"] == "Karthik Raja"
+    assert my_sub["provenance"]["applicant_name"]["source"] == "AI_TEXT"
+
+    # 4. Admin updates status to UNDER_REVIEW and then APPROVED
+    patch_review = client.patch(
+        f"/applications/{app_id}/status",
+        json={"status": "UNDER_REVIEW"},
+        headers=admin_headers,
+    )
+    assert patch_review.status_code == 200
+    assert patch_review.json()["application"]["status"] == "UNDER_REVIEW"
+
+    # User checks individual application review endpoint (GET /applications/{id})
+    detail_resp = client.get(f"/applications/{app_id}", headers=user_headers)
+    assert detail_resp.status_code == 200
+    assert detail_resp.json()["application"]["status"] == "UNDER_REVIEW"
+    assert detail_resp.json()["application"]["provenance"]["email"]["source"] == "AI_DOCUMENT"
+
+    patch_approve = client.patch(
+        f"/applications/{app_id}/status",
+        json={"status": "APPROVED"},
+        headers=admin_headers,
+    )
+    assert patch_approve.status_code == 200
+
+    # User refreshes list and sees APPROVED status
+    final_list = client.get("/applications", headers=user_headers).json()["applications"]
+    final_sub = next(a for a in final_list if a["applicationId"] == app_id)
+    assert final_sub["status"] == "APPROVED"
+
+
+
+
+
+
+def test_production_logging_correlation_id_and_pii_redaction(test_setup):
+    from ai_filler.logging_utils import (
+        clear_telemetry_events,
+        get_recent_telemetry_events,
+        log_structured_event,
+        redact_pii,
+    )
+
+    clear_telemetry_events()
+    user_headers = test_setup["user_headers"]
+    custom_corr_id = "corr_qa_observability_2026"
+
+    # 1. Verify X-Correlation-ID header round-trip and HTTP telemetry emission
+    resp = client.get(
+        "/forms",
+        headers={**user_headers, "X-Correlation-ID": custom_corr_id},
+    )
+    assert resp.status_code == 200
+    assert resp.headers.get("X-Correlation-ID") == custom_corr_id
+
+    events = get_recent_telemetry_events(correlation_id=custom_corr_id)
+    assert any(e["event"] == "http_request_completed" and e["context"]["path"] == "/forms" for e in events)
+
+    # 2. Verify Shift-Left PII & Secret Redaction
+    raw_payload = {
+        "password": "SuperSecretPassword123!",
+        "csrf_token": "tok_abc_123",
+        "prompt": "Contact applicant at arun.kumar@techjays.com using key gsk-1234567890abcdef1234",
+    }
+    redacted = redact_pii(raw_payload)
+    assert redacted["password"] == "[REDACTED]"
+    assert redacted["csrf_token"] == "[REDACTED]"
+    assert "[REDACTED_EMAIL]" in redacted["prompt"]
+    assert "[REDACTED_KEY]" in redacted["prompt"]
+    assert "arun.kumar@techjays.com" not in redacted["prompt"]
+
+    ev = log_structured_event(
+        "security_audit_check",
+        component="qa_test",
+        user_email_note="Reach out to test.user@example.org",
+        api_token="secret_val",
+    )
+    assert ev["context"]["api_token"] == "[REDACTED]"
+    assert "[REDACTED_EMAIL]" in ev["context"]["user_email_note"]
+
+
+def test_admin_document_form_generation_analysis(test_setup, monkeypatch):
+    """Verify AI document analysis converts realistic paper forms into dynamic schemas with exact field types and choice options."""
+    admin_headers = test_setup["admin_headers"]
+
+    # Disable external LLM calls to test deterministic + critic document parsing
+    monkeypatch.setattr("ai_filler.agents.form_agents._invoke_structured_json", lambda *args, **kwargs: None)
+
+    realistic_doc = (
+        "EMPLOYEE REGISTRATION FORM\n"
+        "Please complete all details accurately before onboarding.\n\n"
+        "Full Legal Name: _________________ *\n"
+        "Official Email Address: _________________ *\n"
+        "Date of Birth (DD/MM/YYYY): __________\n"
+        "Contact Phone Number: _________________\n"
+        "Gender: [ ] Male [ ] Female [ ] Other\n"
+        "Department: ( ) Engineering ( ) Marketing ( ) Sales ( ) Human Resources\n"
+        "Technical Skills (Check all that apply): [ ] Python [ ] React [ ] SQL [ ] Docker\n"
+        "Upload Resume or CV (PDF/DOCX) *\n"
+        "Years of Experience: _______\n"
+    )
+
+    resp = client.post(
+        "/ai/generate-form/document",
+        files=[("files", ("employee_registration.txt", realistic_doc.encode("utf-8"), "text/plain"))],
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["title"] == "Employee Registration Form"
+    assert "Please complete all details accurately" in data["description"]
+    assert "analysis_summary" in data
+    assert len(data["fields"]) == 9
+
+    field_map = {f["label"]: f for f in data["fields"]}
+    assert "Full Legal Name" in field_map
+    assert field_map["Full Legal Name"]["type"] == "text"
+    assert field_map["Full Legal Name"]["required"] is True
+
+    assert "Official Email Address" in field_map
+    assert field_map["Official Email Address"]["type"] == "email"
+
+    assert "Date of Birth (DD/MM/YYYY)" in field_map
+    assert field_map["Date of Birth (DD/MM/YYYY)"]["type"] == "date"
+
+    assert "Gender" in field_map
+    assert field_map["Gender"]["type"] == "dropdown"
+    assert field_map["Gender"]["validation"]["options"] == ["Male", "Female", "Other"]
+
+    assert "Department" in field_map
+    assert field_map["Department"]["type"] == "dropdown"
+    assert field_map["Department"]["validation"]["options"] == ["Engineering", "Marketing", "Sales", "Human Resources"]
+
+    assert "Technical Skills" in field_map
+    assert field_map["Technical Skills"]["type"] == "multiselect"
+    assert field_map["Technical Skills"]["validation"]["options"] == ["Python", "React", "SQL", "Docker"]
+
+    assert "Upload Resume or CV (PDF/DOCX)" in field_map
+    assert field_map["Upload Resume or CV (PDF/DOCX)"]["type"] == "file"
+    assert field_map["Upload Resume or CV (PDF/DOCX)"]["required"] is True
+
+    assert "Years of Experience" in field_map
+    assert field_map["Years of Experience"]["type"] == "number"
+
+
+def test_admin_resume_to_form_generation_analysis(test_setup, monkeypatch):
+    """Verify uploading a candidate Resume/CV synthesizes a tailored Job Application Form with extracted skills."""
+    admin_headers = test_setup["admin_headers"]
+
+    # Disable external LLM calls to test deterministic + critic document parsing
+    monkeypatch.setattr("ai_filler.agents.form_agents._invoke_structured_json", lambda *args, **kwargs: None)
+
+    realistic_resume = (
+        "ALEX MORGAN\n"
+        "Senior Full Stack Engineer\n"
+        "alex.morgan@example.com | +1 (555) 234-5678 | San Francisco, CA\n"
+        "linkedin.com/in/alexmorgan | github.com/alexmorgan\n\n"
+        "PROFESSIONAL SUMMARY\n"
+        "Results-driven Senior Full Stack Engineer with 7+ years of experience building distributed systems,\n"
+        "responsive React interfaces, and high-throughput Python microservices in enterprise cloud environments.\n\n"
+        "TECHNICAL SKILLS\n"
+        "Languages: Python, TypeScript, JavaScript, Go, SQL\n"
+        "Frameworks & Libraries: FastAPI, React, Node.js, Next.js, Redux, TailwindCSS\n"
+        "Cloud & DevOps: AWS, Docker, Kubernetes, Terraform, PostgreSQL, Redis, CI/CD\n\n"
+        "WORK EXPERIENCE\n"
+        "Senior Staff Engineer - Techcorp Solutions (2021 - Present)\n"
+        "- Architected real-time event streaming pipeline using Kafka and FastAPI.\n"
+        "- Scaled frontend React applications serving 2M daily active users.\n\n"
+        "Full Stack Developer - CloudWave Inc (2018 - 2021)\n"
+        "- Developed RESTful microservices and PostgreSQL database schemas.\n\n"
+        "EDUCATION\n"
+        "Bachelor of Science in Computer Science - University of California, Berkeley (2014 - 2018)\n"
+    )
+
+    resp = client.post(
+        "/ai/generate-form/document",
+        files=[("files", ("alex_morgan_resume.txt", realistic_resume.encode("utf-8"), "text/plain"))],
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["document_category"] == "resume"
+    assert data["document_type_label"] == "Candidate Resume / CV"
+    assert "Senior Full Stack Engineer" in data["title"]
+    assert "Senior Full Stack Engineer" in data["description"]
+    assert "analysis_summary" in data
+    assert "Candidate Resume / CV" in data["analysis_summary"]
+
+    field_map = {f["fieldKey"]: f for f in data["fields"]}
+    assert "full_name" in field_map
+    assert field_map["full_name"]["type"] == "text"
+    assert field_map["full_name"]["required"] is True
+
+    assert "email_address" in field_map
+    assert field_map["email_address"]["type"] == "email"
+    assert field_map["email_address"]["required"] is True
+
+    assert "phone_number" in field_map
+    assert field_map["phone_number"]["type"] == "text"
+
+    assert "highest_education" in field_map
+    assert field_map["highest_education"]["type"] == "dropdown"
+    assert "Bachelor's Degree" in field_map["highest_education"]["validation"]["options"]
+
+    assert "technical_skills" in field_map
+    assert field_map["technical_skills"]["type"] == "multiselect"
+    skills_options = field_map["technical_skills"]["validation"]["options"]
+    # Check that extracted technical skills from the resume are populated
+    for expected_skill in ["Python", "TypeScript", "FastAPI", "React", "Docker", "AWS"]:
+        assert any(expected_skill.lower() == opt.lower() for opt in skills_options), f"Missing skill {expected_skill} in {skills_options}"
+
+    assert "resume_file_upload" in field_map
+    assert field_map["resume_file_upload"]["type"] == "file"
+    assert field_map["resume_file_upload"]["required"] is True
+
+
+def test_form_voice_and_doc_upload_feature_flags(test_setup):
+    """Verify admin can enable/disable voice and doc upload per form, and flags are exposed in API."""
+    admin_headers = test_setup["admin_headers"]
+    user_headers = test_setup["user_headers"]
+
+    # 1. Create form with voice disabled, doc upload enabled
+    form_id_1 = f"form_voff_{uuid.uuid4().hex[:8]}"
+    resp_1 = client.post(
+        "/forms",
+        json={
+            "form_id": form_id_1,
+            "title": "Voice Disabled Form",
+            "description": "Form without voice",
+            "publish": True,
+            "enable_voice": False,
+            "enable_doc_upload": True,
+            "fields": [
+                {"fieldKey": "applicant_name", "type": "text", "label": "Name", "required": True}
+            ],
+        },
+        headers=admin_headers,
+    )
+    assert resp_1.status_code == 201, resp_1.text
+    form_1 = resp_1.json()["form"]
+    assert form_1["enableVoice"] is False
+    assert form_1["enableDocUpload"] is True
+    assert form_1["enable_voice"] is False
+    assert form_1["enable_doc_upload"] is True
+
+    # Verify GET /forms/{id} returns the flags
+    get_resp_1 = client.get(f"/forms/{form_id_1}", headers=user_headers)
+    assert get_resp_1.status_code == 200
+    fetched_1 = get_resp_1.json()["form"]
+    assert fetched_1["enableVoice"] is False
+    assert fetched_1["enableDocUpload"] is True
+
+    # 2. Customize form to enable voice, disable doc upload
+    cust_resp = client.put(
+        f"/forms/{form_id_1}",
+        json={
+            "enable_voice": True,
+            "enable_doc_upload": False,
+        },
+        headers=admin_headers,
+    )
+    assert cust_resp.status_code == 200, cust_resp.text
+    cust_form = cust_resp.json()["form"]
+    assert cust_form["enableVoice"] is True
+    assert cust_form["enableDocUpload"] is False
+
+    # Verify GET /forms list returns the updated flags
+    list_resp = client.get("/forms", headers=user_headers)
+    assert list_resp.status_code == 200
+    listed_forms = list_resp.json()["forms"]
+    matching = [f for f in listed_forms if f["formId"] == form_id_1]
+    assert len(matching) == 1
+    assert matching[0]["enableVoice"] is True
+    assert matching[0]["enableDocUpload"] is False
+
+    # 3. Create form using camelCase enableVoice=False and enableDocUpload=False
+    form_id_2 = f"form_both_off_{uuid.uuid4().hex[:8]}"
+    resp_2 = client.post(
+        "/forms",
+        json={
+            "form_id": form_id_2,
+            "title": "Both Disabled Form",
+            "publish": True,
+            "enableVoice": False,
+            "enableDocUpload": False,
+            "fields": [
+                {"fieldKey": "test_field", "type": "text", "label": "Field", "required": False}
+            ],
+        },
+        headers=admin_headers,
+    )
+    assert resp_2.status_code == 201, resp_2.text
+    form_2 = resp_2.json()["form"]
+    assert form_2["enableVoice"] is False
+    assert form_2["enableDocUpload"] is False
+
+
+

@@ -66,6 +66,8 @@ def create_form(
     created_by: int,
     organization_id: int | None = None,
     publish: bool = True,
+    enable_voice: bool = True,
+    enable_doc_upload: bool = True,
 ) -> dict[str, Any]:
     form_id = form_id.strip()
     title = title.strip()
@@ -80,9 +82,17 @@ def create_form(
     with connect() as db:
         try:
             db.execute(
-                """INSERT INTO forms (id, organization_id, title, description, created_by)
-                VALUES (?, ?, ?, ?, ?)""",
-                (form_id, organization_id, title, description, created_by),
+                """INSERT INTO forms (id, organization_id, title, description, enable_voice, enable_doc_upload, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    form_id,
+                    organization_id,
+                    title,
+                    description,
+                    1 if enable_voice else 0,
+                    1 if enable_doc_upload else 0,
+                    created_by,
+                ),
             )
         except sqlite3.IntegrityError as error:
             raise ValueError(f"Form with ID '{form_id}' already exists.") from error
@@ -101,6 +111,10 @@ def create_form(
             "version": 1,
             "status": status,
             "fields": validated_fields,
+            "enableVoice": bool(enable_voice),
+            "enableDocUpload": bool(enable_doc_upload),
+            "enable_voice": bool(enable_voice),
+            "enable_doc_upload": bool(enable_doc_upload),
         }
 
 
@@ -112,6 +126,8 @@ def customize_form(
     description: str | None = None,
     fields: list[dict[str, Any]] | None = None,
     publish: bool = True,
+    enable_voice: bool | None = None,
+    enable_doc_upload: bool | None = None,
 ) -> dict[str, Any]:
     """Admin customization of form definitions.
     
@@ -130,13 +146,26 @@ def customize_form(
             raise PermissionError("You do not have permission to customize this form.")
 
         # Update metadata if provided
-        if title is not None or description is not None:
-            new_title = title.strip() if title is not None else form["title"]
-            new_desc = description if description is not None else form["description"]
-            db.execute(
-                "UPDATE forms SET title = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (new_title, new_desc, form_id),
-            )
+        update_clauses = []
+        params = []
+        if title is not None:
+            update_clauses.append("title = ?")
+            params.append(title.strip())
+        if description is not None:
+            update_clauses.append("description = ?")
+            params.append(description)
+        if enable_voice is not None:
+            update_clauses.append("enable_voice = ?")
+            params.append(1 if enable_voice else 0)
+        if enable_doc_upload is not None:
+            update_clauses.append("enable_doc_upload = ?")
+            params.append(1 if enable_doc_upload else 0)
+
+        if update_clauses:
+            update_clauses.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(form_id)
+            sql = f"UPDATE forms SET {', '.join(update_clauses)} WHERE id = ?"
+            db.execute(sql, tuple(params))
 
         # Retrieve current latest version
         latest_version_row = db.execute(
@@ -167,6 +196,8 @@ def customize_form(
             status_to_return = latest_version_row["status"]
 
         updated_form = db.execute("SELECT * FROM forms WHERE id = ?", (form_id,)).fetchone()
+        voice_flag = bool(updated_form["enable_voice"]) if "enable_voice" in updated_form.keys() else True
+        doc_flag = bool(updated_form["enable_doc_upload"]) if "enable_doc_upload" in updated_form.keys() else True
         return {
             "formId": form_id,
             "organizationId": updated_form["organization_id"],
@@ -175,6 +206,10 @@ def customize_form(
             "version": version_to_return,
             "status": status_to_return,
             "fields": fields_to_return,
+            "enableVoice": voice_flag,
+            "enableDocUpload": doc_flag,
+            "enable_voice": voice_flag,
+            "enable_doc_upload": doc_flag,
         }
 
 
@@ -204,6 +239,9 @@ def get_form(form_id: str, version: int | None = None) -> dict[str, Any] | None:
         if not ver_row:
             return None
 
+        voice_flag = bool(form["enable_voice"]) if "enable_voice" in form.keys() else True
+        doc_flag = bool(form["enable_doc_upload"]) if "enable_doc_upload" in form.keys() else True
+
         return {
             "formId": form["id"],
             "organizationId": form["organization_id"],
@@ -214,6 +252,10 @@ def get_form(form_id: str, version: int | None = None) -> dict[str, Any] | None:
             "fields": json.loads(ver_row["fields"]),
             "createdAt": form["created_at"],
             "updatedAt": form["updated_at"],
+            "enableVoice": voice_flag,
+            "enableDocUpload": doc_flag,
+            "enable_voice": voice_flag,
+            "enable_doc_upload": doc_flag,
         }
 
 
@@ -252,6 +294,8 @@ def list_forms(identity: dict[str, Any] | None = None) -> list[dict[str, Any]]:
                 ).fetchone()
 
             if ver_row:
+                voice_flag = bool(form["enable_voice"]) if "enable_voice" in form.keys() else True
+                doc_flag = bool(form["enable_doc_upload"]) if "enable_doc_upload" in form.keys() else True
                 results.append({
                     "formId": form["id"],
                     "organizationId": form["organization_id"],
@@ -260,6 +304,10 @@ def list_forms(identity: dict[str, Any] | None = None) -> list[dict[str, Any]]:
                     "version": ver_row["version"],
                     "status": ver_row["status"],
                     "fields": json.loads(ver_row["fields"]),
+                    "enableVoice": voice_flag,
+                    "enableDocUpload": doc_flag,
+                    "enable_voice": voice_flag,
+                    "enable_doc_upload": doc_flag,
                 })
 
         return results

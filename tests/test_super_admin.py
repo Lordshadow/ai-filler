@@ -66,4 +66,5 @@ def test_organization_admin_is_created_with_organization_and_admin_id():
     assert login(identifier="ADM-EXAMPLE", password="AdminPass07", kind="organization_admin")["user"] == {
         "id": admin["id"], "kind": "organization_admin", "email": "admin@example.org",
         "full_name": "Org Admin", "admin_id": "ADM-EXAMPLE", "organization_id": admin["organization_id"],
+        "created_at": admin["created_at"],
     }

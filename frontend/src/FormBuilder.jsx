@@ -1,15 +1,37 @@
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Eye,
+  FileCheck2,
+  FilePlus2,
+  FileText,
+  FileUp,
+  Layers,
+  Loader2,
+  Mic,
+  Pencil,
+  Plus,
+  RotateCcw,
+  Save,
+  Sparkles,
+  Trash2,
+  UploadCloud,
+  X,
+} from "lucide-react";
 import { authFetch } from "./api";
 import "./FormBuilder.css";
+import "./Auth.css";
 
 const FIELD_TYPES = [
-  { value: "text", label: "📝 Short Text", desc: "Names, addresses, codes" },
-  { value: "email", label: "✉️ Email Address", desc: "Applicant contact email" },
-  { value: "number", label: "🔢 Number", desc: "Age, income, quantities" },
-  { value: "date", label: "📅 Date Picker", desc: "Date of birth, deadlines" },
+  { value: "text", label: "Short text", desc: "Names, addresses, codes" },
+  { value: "email", label: "Email address", desc: "Applicant contact email" },
+  { value: "number", label: "Number", desc: "Age, income, quantities" },
+  { value: "date", label: "Date", desc: "Date of birth, deadlines" },
   { value: "dropdown", label: "▾ Dropdown Select", desc: "Single selection from list" },
-  { value: "multiselect", label: "☑️ Checkboxes", desc: "Multiple selections from list" },
-  { value: "file", label: "📎 File Upload", desc: "PDF, image, document files" },
+  { value: "multiselect", label: "Checkboxes", desc: "Multiple selections from list" },
+  { value: "file", label: "File upload", desc: "PDF, image, document files" },
 ];
 
 function generateSlug(text) {
@@ -37,17 +59,27 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
     title: "",
     description: "",
     publish: true,
+    enable_voice: true,
+    enable_doc_upload: true,
     fields: [],
   });
 
-  // Multi-Agent AI Form Architect state (Admin Form Creation via Voice & Document)
+  // Multi-Agent AI Form Architect state
   const [aiBuilderProcessing, setAiBuilderProcessing] = useState(false);
   const [aiBuilderStatus, setAiBuilderStatus] = useState("");
   const [aiBuilderMeta, setAiBuilderMeta] = useState(null);
-  const [isRecordingBuilder, setIsRecordingBuilder] = useState(false);
   const [showBuilderPrompt, setShowBuilderPrompt] = useState(false);
   const [builderPromptText, setBuilderPromptText] = useState("");
   const [appendFieldsMode, setAppendFieldsMode] = useState(false);
+
+  // Document AI Form Generation Modal State
+  const [showDocModal, setShowDocModal] = useState(false);
+  const [selectedDocFiles, setSelectedDocFiles] = useState([]);
+  const [docModalMode, setDocModalMode] = useState("new"); // "new" | "append"
+  const [docModalStep, setDocModalStep] = useState("upload"); // "upload" | "analyzing" | "review"
+  const [docAnalysisResult, setDocAnalysisResult] = useState(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const docFileInputRef = useRef(null);
 
   // Multi-Agent AI Smart-Fill state inside Admin Preview Modal
   const [previewData, setPreviewData] = useState({});
@@ -55,15 +87,7 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
   const [previewConfidence, setPreviewConfidence] = useState({});
   const [previewAiProcessing, setPreviewAiProcessing] = useState(false);
   const [previewAiMeta, setPreviewAiMeta] = useState(null);
-  const [isRecordingPreview, setIsRecordingPreview] = useState(false);
-
-  const builderRecorderRef = useRef(null);
-  const builderAudioChunksRef = useRef([]);
   const builderDocInputRef = useRef(null);
-  const builderAudioInputRef = useRef(null);
-
-  const previewRecorderRef = useRef(null);
-  const previewAudioChunksRef = useRef([]);
   const previewDocInputRef = useRef(null);
 
   const fetchForms = async () => {
@@ -94,6 +118,8 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
       title: "Untitled Dynamic Form",
       description: "Provide details requested in this form.",
       publish: true,
+      enable_voice: true,
+      enable_doc_upload: true,
       fields: [
         {
           id: "q_1",
@@ -126,6 +152,8 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
       title: form.title,
       description: form.description || "",
       publish: form.status === "published",
+      enable_voice: form.enableVoice !== undefined ? Boolean(form.enableVoice) : (form.enable_voice !== undefined ? Boolean(form.enable_voice) : true),
+      enable_doc_upload: form.enableDocUpload !== undefined ? Boolean(form.enableDocUpload) : (form.enable_doc_upload !== undefined ? Boolean(form.enable_doc_upload) : true),
       fields: form.fields.map((f, idx) => ({
         ...f,
         id: `q_${idx}_${Math.random()}`,
@@ -151,7 +179,34 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
     setPreviewForm(form);
   };
 
-  // ── Multi-Agent Form Schema Generation (Admin Voice & Document Icons) ──
+  const handleClearFormCreation = () => {
+    if (window.confirm("Are you sure you want to clear all form fields and entered text?")) {
+      setFormState((prev) => ({
+        ...prev,
+        title: "",
+        description: "",
+        fields: [],
+      }));
+      setAiBuilderMeta(null);
+      setError("");
+      setSuccess("");
+    }
+  };
+
+  const handleClearPreviewData = () => {
+    if (!previewForm) return;
+    const init = {};
+    (previewForm.fields || []).forEach((f) => {
+      const key = f.fieldKey || f.name;
+      init[key] = f.type === "multiselect" ? [] : "";
+    });
+    setPreviewData(init);
+    setPreviewProvenance({});
+    setPreviewConfidence({});
+    setPreviewAiMeta(null);
+  };
+
+  // ── Multi-Agent Form Schema Generation (Text & Document) ──
 
   const applyGeneratedFormSchema = (result, shouldAppend = false) => {
     if (!result || !Array.isArray(result.fields)) return;
@@ -184,7 +239,7 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
         description:
           shouldAppend && prev.description
             ? prev.description
-            : result.description || prev.description || "Form generated by Multi-Agent AI Schema Architect.",
+            : result.description || prev.description || "Created from form details.",
         publish: prev.publish ?? true,
         fields: mergedFields,
       };
@@ -193,7 +248,6 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
     setAiBuilderMeta({
       accuracyScore: result.accuracy_score || 99.1,
       fieldsCount: generatedFields.length,
-      transcript: result.transcript || "",
       documents: result.documents || [],
       agentTrace: result.agent_trace || [],
     });
@@ -204,94 +258,11 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
     }
   };
 
-  const sendBuilderAudioToMultiAgent = async (audioBlob, filename, shouldAppend = false) => {
-    setAiBuilderProcessing(true);
-    setError("");
-    setAiBuilderStatus(
-      "Multi-Agent Form Architect transcribing voice & synthesizing schema (Whisper-v3 → Architect → Compliance Critic)..."
-    );
-
-    try {
-      const payload = new FormData();
-      payload.append("file", audioBlob, filename);
-      if (shouldAppend && formState.fields?.length > 0) {
-        payload.append(
-          "existing_fields_json",
-          JSON.stringify(formState.fields.map(({ id, ...rest }) => rest))
-        );
-      }
-
-      const res = await authFetch("/ai/generate-form/voice", {
-        method: "POST",
-        body: payload,
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.detail || "Voice AI form generation failed.");
-      }
-
-      applyGeneratedFormSchema(data, shouldAppend);
-    } catch (err) {
-      setError(err.message || "Failed to generate form from voice.");
-    } finally {
-      setAiBuilderProcessing(false);
-      setAiBuilderStatus("");
-    }
-  };
-
-  const handleToggleBuilderVoice = async (shouldAppend = false) => {
-    setError("");
-    setAppendFieldsMode(shouldAppend);
-
-    if (isRecordingBuilder) {
-      builderRecorderRef.current?.stop();
-      setIsRecordingBuilder(false);
-      return;
-    }
-
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setShowBuilderPrompt(true);
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      builderAudioChunksRef.current = [];
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          builderAudioChunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.onstop = async () => {
-        const audioBlob = new Blob(builderAudioChunksRef.current, { type: "audio/webm" });
-        stream.getTracks().forEach((t) => t.stop());
-        await sendBuilderAudioToMultiAgent(audioBlob, "admin_form_spec.webm", shouldAppend);
-      };
-
-      builderRecorderRef.current = recorder;
-      recorder.start();
-      setIsRecordingBuilder(true);
-    } catch {
-      setShowBuilderPrompt(true);
-    }
-  };
-
-  const handleBuilderAudioUpload = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    await sendBuilderAudioToMultiAgent(file, file.name, appendFieldsMode);
-  };
-
   const handleBuilderPromptSubmit = async () => {
     if (!builderPromptText.trim()) return;
     setAiBuilderProcessing(true);
     setError("");
-    setAiBuilderStatus("Multi-Agent Form Architect designing & validating form schema...");
+    setAiBuilderStatus("Creating and checking form…");
 
     try {
       const res = await authFetch("/ai/generate-form/text", {
@@ -302,14 +273,14 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
             appendFieldsMode && formState.fields?.length > 0
               ? formState.fields.map(({ id, ...rest }) => rest)
               : null,
-          source_type: "AI_VOICE",
+          source_type: "AI_TEXT",
         }),
       });
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.detail || "AI form generation failed.");
       }
-      applyGeneratedFormSchema({ ...data, transcript: builderPromptText }, appendFieldsMode);
+      applyGeneratedFormSchema(data, appendFieldsMode);
       setShowBuilderPrompt(false);
       setBuilderPromptText("");
     } catch (err) {
@@ -320,6 +291,74 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
     }
   };
 
+  const handleDocFilesSelected = (filesList) => {
+    const validExts = [".pdf", ".docx", ".txt", ".png", ".jpg", ".jpeg", ".webp"];
+    const files = Array.from(filesList || []).filter((f) => {
+      const ext = "." + (f.name.split(".").pop() || "").toLowerCase();
+      return validExts.includes(ext);
+    });
+    if (files.length > 0) {
+      setSelectedDocFiles(files);
+      setError("");
+    } else {
+      setError("Please select a supported document file (.pdf, .docx, .txt, .png, .jpg, .webp).");
+    }
+  };
+
+  const handleStartDocAnalysis = async () => {
+    if (selectedDocFiles.length === 0) return;
+    setDocModalStep("analyzing");
+    setAiBuilderProcessing(true);
+    setError("");
+
+    try {
+      const payload = new FormData();
+      selectedDocFiles.forEach((f) => payload.append("files", f));
+      if (docModalMode === "append" && formState.fields?.length > 0) {
+        payload.append(
+          "existing_fields_json",
+          JSON.stringify(formState.fields.map(({ id, ...rest }) => rest))
+        );
+      }
+
+      const res = await authFetch("/ai/generate-form/document", {
+        method: "POST",
+        body: payload,
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "Document AI form generation failed.");
+      }
+
+      setDocAnalysisResult(data);
+      setDocModalStep("review");
+    } catch (err) {
+      setError(err.message || "Failed to analyze document.");
+      setDocModalStep("upload");
+    } finally {
+      setAiBuilderProcessing(false);
+    }
+  };
+
+  const handleApplyDocAnalysisResult = () => {
+    if (!docAnalysisResult) return;
+    applyGeneratedFormSchema(docAnalysisResult, docModalMode === "append");
+    setShowDocModal(false);
+    setSelectedDocFiles([]);
+    setDocAnalysisResult(null);
+    setDocModalStep("upload");
+  };
+
+  const openDocGeneratorModal = (mode = "new") => {
+    setDocModalMode(mode);
+    setDocModalStep("upload");
+    setSelectedDocFiles([]);
+    setDocAnalysisResult(null);
+    setShowDocModal(true);
+    setError("");
+  };
+
   const handleBuilderDocumentUpload = async (e) => {
     const selectedFiles = Array.from(e.target.files || []);
     e.target.value = "";
@@ -328,7 +367,7 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
     setAiBuilderProcessing(true);
     setError("");
     setAiBuilderStatus(
-      `Multi-Agent Document Architect parsing ${selectedFiles.length} document(s) & building form schema...`
+      `Reading ${selectedFiles.length} document(s)…`
     );
 
     try {
@@ -382,72 +421,7 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
     setPreviewConfidence((prev) => ({ ...prev, ...(data.confidence_scores || {}) }));
     setPreviewAiMeta({
       accuracyScore: data.accuracy_score || 99.0,
-      transcript: data.transcript || "",
     });
-  };
-
-  const handleTogglePreviewVoice = async () => {
-    if (!previewForm) return;
-    if (isRecordingPreview) {
-      previewRecorderRef.current?.stop();
-      setIsRecordingPreview(false);
-      return;
-    }
-
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      const sampleText = window.prompt(
-        "Microphone unavailable. Enter spoken transcript to test Multi-Agent Form Fill:"
-      );
-      if (!sampleText) return;
-      setPreviewAiProcessing(true);
-      try {
-        const res = await authFetch("/ai/fill-form/text", {
-          method: "POST",
-          body: JSON.stringify({
-            text: sampleText,
-            fields: previewForm.fields || [],
-            form_title: previewForm.title || "",
-            current_data: previewData,
-          }),
-        });
-        const data = await res.json();
-        if (res.ok) applyPreviewFillResult({ ...data, transcript: sampleText });
-      } finally {
-        setPreviewAiProcessing(false);
-      }
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      previewAudioChunksRef.current = [];
-      recorder.ondataavailable = (ev) => {
-        if (ev.data.size > 0) previewAudioChunksRef.current.push(ev.data);
-      };
-      recorder.onstop = async () => {
-        const blob = new Blob(previewAudioChunksRef.current, { type: "audio/webm" });
-        stream.getTracks().forEach((t) => t.stop());
-        setPreviewAiProcessing(true);
-        try {
-          const payload = new FormData();
-          payload.append("file", blob, "preview_voice.webm");
-          payload.append("fields_json", JSON.stringify(previewForm.fields || []));
-          payload.append("form_title", previewForm.title || "");
-          payload.append("current_data_json", JSON.stringify(previewData));
-          const res = await authFetch("/ai/fill-form/voice", { method: "POST", body: payload });
-          const data = await res.json();
-          if (res.ok) applyPreviewFillResult(data);
-        } finally {
-          setPreviewAiProcessing(false);
-        }
-      };
-      previewRecorderRef.current = recorder;
-      recorder.start();
-      setIsRecordingPreview(true);
-    } catch {
-      // ignore
-    }
   };
 
   const handlePreviewDocUpload = async (e) => {
@@ -565,6 +539,10 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
             title: formState.title,
             description: formState.description,
             publish: formState.publish,
+            enable_voice: Boolean(formState.enable_voice),
+            enable_doc_upload: Boolean(formState.enable_doc_upload),
+            enableVoice: Boolean(formState.enable_voice),
+            enableDocUpload: Boolean(formState.enable_doc_upload),
             fields: formState.fields.map(({ id, ...rest }) => rest),
           }),
         });
@@ -582,6 +560,10 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
             title: formState.title,
             description: formState.description,
             publish: formState.publish,
+            enable_voice: Boolean(formState.enable_voice),
+            enable_doc_upload: Boolean(formState.enable_doc_upload),
+            enableVoice: Boolean(formState.enable_voice),
+            enableDocUpload: Boolean(formState.enable_doc_upload),
             fields: formState.fields.map(({ id, ...rest }) => rest),
           }),
         });
@@ -600,7 +582,7 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
 
   return (
     <div className="fb-container">
-      {/* Hidden File Inputs for Multi-Agent Admin Form Generation & Preview Fill */}
+      {/* Hidden document inputs for AI form generation and preview fill */}
       <input
         ref={builderDocInputRef}
         type="file"
@@ -608,13 +590,6 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
         accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp"
         style={{ display: "none" }}
         onChange={handleBuilderDocumentUpload}
-      />
-      <input
-        ref={builderAudioInputRef}
-        type="file"
-        accept=".webm,.wav,.mp3,.m4a,.ogg,audio/*"
-        style={{ display: "none" }}
-        onChange={handleBuilderAudioUpload}
       />
       <input
         ref={previewDocInputRef}
@@ -632,9 +607,9 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
       {aiBuilderProcessing && (
         <div
           style={{
-            background: "#eff6ff",
-            border: "1px solid #93c5fd",
-            color: "#1e40af",
+            background: "rgba(255, 255, 255, 0.08)",
+            border: "1px solid rgba(255, 255, 255, 0.24)",
+            color: "#ffffff",
             padding: "12px 16px",
             borderRadius: "10px",
             marginBottom: "18px",
@@ -642,40 +617,40 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
             alignItems: "center",
             gap: "10px",
             fontSize: "13px",
-            fontWeight: 600,
+            fontWeight: 650,
           }}
         >
-          <span>🤖</span>
-          <span>{aiBuilderStatus || "Multi-Agent Form Architect processing..."}</span>
+          <span>{aiBuilderStatus || "Creating form…"}</span>
         </div>
       )}
 
-      {/* Voice / Prompt Form Architect Drawer */}
+      {/* AI form builder Drawer */}
       {showBuilderPrompt && (
         <div
+          className="fb-prompt-drawer"
           style={{
-            background: "#f8fafc",
-            border: "1px solid #cbd5e1",
+            background: "rgba(255, 255, 255, 0.07)",
+            border: "1px solid rgba(255, 255, 255, 0.22)",
             borderRadius: "10px",
             padding: "14px 16px",
             marginBottom: "18px",
           }}
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-            <strong style={{ fontSize: "13px", color: "#1e293b" }}>
-              🎤 Multi-Agent Voice / Prompt Form Schema Architect (≥98% Compliance)
+            <strong style={{ fontSize: "13px", color: "#ffffff" }}>
+               AI form builder
             </strong>
             <button
               type="button"
               onClick={() => setShowBuilderPrompt(false)}
-              style={{ background: "none", border: "none", cursor: "pointer", color: "#64748b", fontSize: "14px" }}
+              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-secondary)", fontSize: "14px" }}
             >
-              ✕
+              <X size={16} aria-hidden="true" />
             </button>
           </div>
           <textarea
             rows={2}
-            placeholder="Describe the form to create or fields to add, e.g.: 'Create an Employee Onboarding form with Full Name, Email Address, Date of Birth, Department dropdown with Engineering, Sales, HR, and Skills multiselect with Python, React, SQL'"
+            placeholder="Describe the form and the fields it needs"
             value={builderPromptText}
             onChange={(e) => setBuilderPromptText(e.target.value)}
             style={{
@@ -690,19 +665,11 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
           <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
             <button
               type="button"
-              className="fb-btn fb-btn-secondary fb-btn-sm"
-              onClick={() => builderAudioInputRef.current?.click()}
-              disabled={aiBuilderProcessing}
-            >
-              🎧 Upload Voice Audio File
-            </button>
-            <button
-              type="button"
               className="fb-btn fb-btn-primary fb-btn-sm"
               onClick={handleBuilderPromptSubmit}
               disabled={aiBuilderProcessing || !builderPromptText.trim()}
             >
-              ✨ Generate Form Schema
+              <Sparkles size={15} aria-hidden="true" /> Create form
             </button>
           </div>
         </div>
@@ -713,35 +680,13 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
         <div>
           <div className="fb-header">
             <div>
-              <h2>Form Templates & Workflows</h2>
-              <p style={{ margin: "4px 0 0", color: "#64748b", fontSize: "14px" }}>
-                Create, customize, and manage dynamic questionnaires manually or with <strong>🎤 Voice AI</strong> & <strong>📄 Document Upload</strong>.
+              <h2>Forms</h2>
+              <p style={{ margin: "4px 0 0", color: "var(--text-secondary)", fontSize: "14px" }}>
+                Create and manage forms. Add fields manually, from a text description, or from a document.
               </p>
             </div>
             <div className="fb-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-              {/* Voice AI Form Creation Icon Button */}
-              <button
-                type="button"
-                className="fb-btn fb-btn-secondary"
-                onClick={() => handleToggleBuilderVoice(false)}
-                disabled={aiBuilderProcessing}
-                title="Create New Form with Voice AI (Multi-Agent Architect)"
-                aria-label="Create New Form with Voice AI"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  borderColor: isRecordingBuilder ? "#ef4444" : "#3b82f6",
-                  background: isRecordingBuilder ? "#fef2f2" : "#eff6ff",
-                  color: isRecordingBuilder ? "#dc2626" : "#1d4ed8",
-                  fontWeight: 600,
-                }}
-              >
-                <span style={{ fontSize: "16px" }}>{isRecordingBuilder ? "⏹️" : "🎤"}</span>
-                <span>{isRecordingBuilder ? "Stop Voice" : "Voice Create"}</span>
-              </button>
-
-              {/* Voice / Prompt Assistant Icon Button */}
+              {/* Text prompt form creation */}
               <button
                 type="button"
                 className="fb-btn fb-btn-secondary"
@@ -750,40 +695,28 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
                   setShowBuilderPrompt((prev) => !prev);
                 }}
                 disabled={aiBuilderProcessing}
-                title="Describe Form via Voice/Text Prompt"
-                aria-label="Describe Form via Voice or Text Prompt"
-                style={{ padding: "8px 12px" }}
+                title="Describe form with a text prompt"
+                aria-label="Describe form with a text prompt"
+                style={{ padding: "8px 14px" }}
               >
-                💬
+                <Sparkles size={16} aria-hidden="true" /> Describe form
               </button>
 
               {/* Document Upload Form Creation Icon Button */}
               <button
                 type="button"
                 className="fb-btn fb-btn-secondary"
-                onClick={() => {
-                  setAppendFieldsMode(false);
-                  builderDocInputRef.current?.click();
-                }}
+                onClick={() => openDocGeneratorModal("new")}
                 disabled={aiBuilderProcessing}
-                title="Create New Form by Uploading Document (PDF, DOCX, Image, TXT)"
-                aria-label="Create New Form by Uploading Document"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  borderColor: "#0d9488",
-                  background: "#f0fdfa",
-                  color: "#0f766e",
-                  fontWeight: 600,
-                }}
+                title="Create form by Uploading Document (PDF, DOCX, Image, TXT)"
+                aria-label="Create form by Uploading Document"
+                style={{ padding: "8px 14px" }}
               >
-                <span style={{ fontSize: "16px" }}>📄</span>
-                <span>Doc Create</span>
+                <FileUp size={16} aria-hidden="true" /><span>Create from document</span>
               </button>
 
               <button className="fb-btn fb-btn-primary" onClick={handleStartCreate}>
-                + Create New Form
+                <Plus size={16} aria-hidden="true" /> Create form
               </button>
             </div>
           </div>
@@ -794,28 +727,17 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
             <div className="fb-grid">
               {/* Blank Form Starter Card */}
               <div className="fb-create-card" onClick={handleStartCreate}>
-                <div className="fb-create-icon">➕</div>
+                <FilePlus2 size={27} aria-hidden="true" className="fb-create-icon" />
                 <div className="fb-create-title">Blank Form</div>
                 <span style={{ fontSize: "12px", marginTop: "4px" }}>Start from scratch</span>
                 <div style={{ display: "flex", gap: "8px", marginTop: "12px" }} onClick={(e) => e.stopPropagation()}>
                   <button
                     type="button"
                     className="fb-btn fb-btn-secondary fb-btn-sm"
-                    title="Create Form with Voice AI"
-                    onClick={() => handleToggleBuilderVoice(false)}
-                  >
-                    🎤 Voice
-                  </button>
-                  <button
-                    type="button"
-                    className="fb-btn fb-btn-secondary fb-btn-sm"
                     title="Create Form from Document Upload"
-                    onClick={() => {
-                      setAppendFieldsMode(false);
-                      builderDocInputRef.current?.click();
-                    }}
+                    onClick={() => openDocGeneratorModal("new")}
                   >
-                    📄 Document
+                    <FileUp size={14} aria-hidden="true" /> Document
                   </button>
                 </div>
               </div>
@@ -826,31 +748,42 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
                   <div className="fb-card-top">
                     <h3 className="fb-card-title">{form.title}</h3>
                   </div>
-                  <p className="fb-card-desc">{form.description || "No description provided."}</p>
+                  <p className="fb-card-desc">{form.description || "No description added."}</p>
 
                   <div className="fb-badge-group">
                     <span className={`fb-badge fb-badge-${form.status}`}>{form.status}</span>
                     <span className="fb-badge fb-badge-version">v{form.version}</span>
-                    <span className="fb-badge" style={{ background: "#f1f5f9", color: "#475569" }}>
+                    <span className="fb-badge fb-badge-count">
                       {form.fields?.length || 0} Questions
+                    </span>
+                    <span
+                      className={`fb-badge ${form.enableVoice !== false && form.enable_voice !== false ? "fb-badge-feature-on" : "fb-badge-feature-off"}`}
+                    >
+                      Voice: {form.enableVoice !== false && form.enable_voice !== false ? "On" : "Off"}
+                    </span>
+                    <span
+                      className={`fb-badge ${form.enableDocUpload !== false && form.enable_doc_upload !== false ? "fb-badge-feature-on" : "fb-badge-feature-off"}`}
+                    >
+                      Doc: {form.enableDocUpload !== false && form.enable_doc_upload !== false ? "On" : "Off"}
                     </span>
                   </div>
 
                   <div className="fb-card-actions">
                     <button className="fb-btn fb-btn-secondary fb-btn-sm" onClick={() => handleStartEdit(form)}>
-                      ✏️ Customize
+                      <Pencil size={14} aria-hidden="true" /> Customize
                     </button>
                     <button
                       className="fb-btn fb-btn-secondary fb-btn-sm"
                       onClick={() => handleOpenPreview(form)}
                     >
-                      👁️ Preview & AI Fill
+                      <Eye size={14} aria-hidden="true" /> Preview and fill
                     </button>
                     <button
                       className="fb-btn fb-btn-danger fb-btn-sm"
                       onClick={() => handleDeleteForm(form.formId)}
+                      aria-label={`Delete ${form.title}`}
                     >
-                      🗑️
+                      <Trash2 size={14} aria-hidden="true" /> Delete
                     </button>
                   </div>
                 </div>
@@ -865,7 +798,7 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
         <div className="fb-editor">
           <div className="fb-header" style={{ marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
             <button className="fb-btn fb-btn-secondary fb-btn-sm" onClick={() => setView("list")}>
-              ← Back to Forms
+              <ArrowLeft size={15} aria-hidden="true" /> Back to forms
             </button>
 
             {/* Inline AI Form Architect Icons inside Editor */}
@@ -874,24 +807,15 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
                 display: "flex",
                 alignItems: "center",
                 gap: "8px",
-                background: "#f8fafc",
-                border: "1px solid #cbd5e1",
+                background: "rgba(255, 255, 255, 0.08)",
+                border: "1px solid rgba(255, 255, 255, 0.22)",
                 padding: "6px 12px",
                 borderRadius: "10px",
               }}
             >
-              <span style={{ fontSize: "12px", fontWeight: 700, color: "#1e40af" }}>
-                🤖 AI Architect:
+              <span style={{ fontSize: "12px", fontWeight: 700, color: "#ffffff" }}>
+                 AI form builder
               </span>
-              <button
-                type="button"
-                className="fb-btn fb-btn-secondary fb-btn-sm"
-                onClick={() => handleToggleBuilderVoice(true)}
-                disabled={aiBuilderProcessing}
-                title="Dictate Questions with Voice AI"
-              >
-                {isRecordingBuilder ? "⏹️ Stop Voice" : "🎤 Voice Add Fields"}
-              </button>
               <button
                 type="button"
                 className="fb-btn fb-btn-secondary fb-btn-sm"
@@ -900,33 +824,46 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
                   setShowBuilderPrompt((prev) => !prev);
                 }}
                 disabled={aiBuilderProcessing}
-                title="Describe Questions via Prompt"
+                title="Describe questions to add"
+                aria-label="Describe questions to add"
               >
-                💬
+                Describe fields
               </button>
               <button
                 type="button"
                 className="fb-btn fb-btn-secondary fb-btn-sm"
-                onClick={() => {
-                  setAppendFieldsMode(true);
-                  builderDocInputRef.current?.click();
-                }}
+                onClick={() => openDocGeneratorModal("append")}
                 disabled={aiBuilderProcessing}
                 title="Upload Document to Extract & Add Questions"
               >
-                📄 Upload Doc Fields
+                <FileUp size={14} aria-hidden="true" /> Add from document
               </button>
             </div>
 
             <div className="fb-header-actions">
               <button
+                type="button"
+                className="fb-btn fb-btn-secondary"
+                onClick={handleClearFormCreation}
+                title="Clear all fields and entered text from the form"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  borderColor: "rgba(239, 68, 68, 0.35)",
+                  color: "#fca5a5",
+                }}
+              >
+                <RotateCcw size={15} aria-hidden="true" /> Clear
+              </button>
+              <button
                 className="fb-btn fb-btn-secondary"
                 onClick={() => handleOpenPreview(formState)}
               >
-                👁️ Preview Form
+                <Eye size={15} aria-hidden="true" /> Preview
               </button>
               <button className="fb-btn fb-btn-primary" onClick={handleSaveForm}>
-                💾 Save & Publish Form
+                <Save size={15} aria-hidden="true" /> Save and publish
               </button>
             </div>
           </div>
@@ -934,13 +871,13 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
           {aiBuilderMeta && (
             <div
               style={{
-                background: "#f0fdf4",
-                border: "1px solid #86efac",
+                background: "rgba(255, 255, 255, 0.08)",
+                border: "1px solid rgba(255, 255, 255, 0.25)",
                 borderRadius: "10px",
                 padding: "12px 16px",
                 marginBottom: "16px",
                 fontSize: "13px",
-                color: "#166534",
+                color: "#ffffff",
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
@@ -949,7 +886,7 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
               }}
             >
               <div>
-                <strong>✅ Multi-Agent Form Schema Generated:</strong> Synthesized{" "}
+                <strong> Form created:</strong> Added{" "}
                 <strong>{aiBuilderMeta.fieldsCount}</strong> schema-compliant field(s).
               </div>
               <span
@@ -962,7 +899,7 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
                   fontSize: "12px",
                 }}
               >
-                🎯 {aiBuilderMeta.accuracyScore}% Schema Compliance
+                 {aiBuilderMeta.accuracyScore}% Schema accuracy
               </span>
             </div>
           )}
@@ -998,6 +935,86 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
                 }
               />
               {!isEditingExisting && <small>(Unique system identifier)</small>}
+            </div>
+
+            {/* Form Features: Voice & Document Upload Toggles */}
+            <div
+              className="fb-features-panel"
+              style={{
+                marginTop: "16px",
+                padding: "14px 16px",
+                background: "rgba(255, 255, 255, 0.05)",
+                border: "1px solid var(--glass-line, rgba(176, 202, 236, 0.2))",
+                borderRadius: "10px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "12px",
+              }}
+            >
+              <div style={{ fontSize: "12.5px", fontWeight: 700, color: "var(--text-secondary, #b7c5d7)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Applicant Smart-Fill Features
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "12px" }}>
+                {/* Voice Assistant Toggle */}
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "10px",
+                    padding: "12px 14px",
+                    borderRadius: "8px",
+                    border: `1px solid ${formState.enable_voice ? "rgba(91, 142, 219, 0.5)" : "rgba(100, 116, 139, 0.3)"}`,
+                    background: formState.enable_voice ? "rgba(91, 142, 219, 0.12)" : "rgba(15, 23, 42, 0.4)",
+                    cursor: "pointer",
+                    userSelect: "none",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={formState.enable_voice}
+                    onChange={(e) => setFormState({ ...formState, enable_voice: e.target.checked })}
+                    style={{ marginTop: "3px" }}
+                  />
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: 600, fontSize: "13.5px", color: formState.enable_voice ? "#93c5fd" : "#94a3b8" }}>
+                      <Mic size={15} aria-hidden="true" /> Voice Assistant (Talk through form)
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "3px", lineHeight: "1.35" }}>
+                      Enables applicants to speak answers via conversational voice turn-taking. When disabled, the voice button is hidden for this form.
+                    </div>
+                  </div>
+                </label>
+
+                {/* Document Upload Toggle */}
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "10px",
+                    padding: "12px 14px",
+                    borderRadius: "8px",
+                    border: `1px solid ${formState.enable_doc_upload ? "rgba(105, 196, 211, 0.5)" : "rgba(100, 116, 139, 0.3)"}`,
+                    background: formState.enable_doc_upload ? "rgba(105, 196, 211, 0.12)" : "rgba(15, 23, 42, 0.4)",
+                    cursor: "pointer",
+                    userSelect: "none",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={formState.enable_doc_upload}
+                    onChange={(e) => setFormState({ ...formState, enable_doc_upload: e.target.checked })}
+                    style={{ marginTop: "3px" }}
+                  />
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: 600, fontSize: "13.5px", color: formState.enable_doc_upload ? "#75d8df" : "#94a3b8" }}>
+                      <FileUp size={15} aria-hidden="true" /> Document Upload (Autofill from files)
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "3px", lineHeight: "1.35" }}>
+                      Enables applicants to upload resumes or documents to autofill fields. When disabled, the document upload button is hidden for this form.
+                    </div>
+                  </div>
+                </label>
+              </div>
             </div>
           </div>
 
@@ -1058,21 +1075,21 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
                       style={{
                         marginBottom: "12px",
                         padding: "8px 12px",
-                        background: "#f0fdf4",
-                        border: "1px solid #bbf7d0",
+                        background: "rgba(255, 255, 255, 0.06)",
+                        border: "1px solid rgba(255, 255, 255, 0.18)",
                         borderRadius: "6px",
                         fontSize: "12px",
-                        color: "#166534",
+                        color: "#ffffff",
                       }}
                     >
-                      ✉️ <strong>Email Address Field:</strong> Automatically enforces valid email format with '@' and domain name (e.g. user@example.com).
+                       <strong>Email address</strong> fields are checked for a valid address.
                     </div>
                   )}
 
                   {/* Dropdown & Multiselect Options */}
                   {["dropdown", "multiselect"].includes(field.type) && (
                     <div>
-                      <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "600" }}>
+                      <span style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: "600" }}>
                         Answer Options:
                       </span>
                       <div className="fb-options-list">
@@ -1238,9 +1255,9 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
                       type="button"
                       className="fb-btn fb-btn-danger fb-btn-sm"
                       onClick={() => handleRemoveField(idx)}
-                      title="Delete Question"
+                      title="Delete question"
                     >
-                      🗑️
+                      Delete
                     </button>
                   </div>
                 </div>
@@ -1251,57 +1268,78 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
           {/* Add Question Banner */}
           <div className="fb-add-banner">
             <button type="button" className="fb-add-q-btn" onClick={handleAddField}>
-              <span>➕</span> Add Question
+              Add question
             </button>
           </div>
         </div>
       )}
 
-      {/* ── View 3: Live Preview Modal with Inline AI Voice & Document Fill Icons ── */}
-      {previewForm && (
+      {/* ── View 3: Live Preview Modal with Document Fill ── */}
+      {previewForm && createPortal(
         <div className="fb-modal-overlay" onClick={() => setPreviewForm(null)}>
-          <div className="fb-modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="fb-preview-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", flexWrap: "wrap" }}>
+          <div className="fb-modal-content" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="preview-modal-title">
+            <div className="fb-preview-header">
               <div>
-                <h2 style={{ margin: "0 0 8px 0" }}>{previewForm.title}</h2>
-                <p style={{ margin: 0, color: "#64748b" }}>{previewForm.description}</p>
+                <h2 id="preview-modal-title" style={{ margin: "0 0 6px 0", color: "#ffffff" }}>{previewForm.title}</h2>
+                <p className="fb-preview-desc" style={{ margin: 0, color: "var(--text-secondary)", fontSize: "14px" }}>
+                  {previewForm.description || "Provide details requested in this form."}
+                </p>
               </div>
-              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <div className="fb-preview-header-actions" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                 <button
                   type="button"
                   className="fb-btn fb-btn-secondary fb-btn-sm"
-                  onClick={handleTogglePreviewVoice}
+                  onClick={handleClearPreviewData}
                   disabled={previewAiProcessing}
-                  title="Test Fill Form with Voice AI"
+                  title="Clear all fields and entered text from the preview form"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "5px",
+                    borderColor: "rgba(248, 113, 113, 0.35)",
+                    color: "#f87171",
+                  }}
                 >
-                  {isRecordingPreview ? "⏹️ Stop Voice" : "🎤 Voice Fill"}
+                  <RotateCcw size={13} aria-hidden="true" /> Clear
                 </button>
+                {(previewForm.enableDocUpload !== false && previewForm.enable_doc_upload !== false) && (
+                  <button
+                    type="button"
+                    className="fb-btn fb-btn-secondary fb-btn-sm"
+                    onClick={() => previewDocInputRef.current?.click()}
+                    disabled={previewAiProcessing}
+                    title="Test Fill Form by Uploading Document"
+                  >
+                    <FileUp size={13} aria-hidden="true" /> Upload Doc
+                  </button>
+                )}
                 <button
                   type="button"
-                  className="fb-btn fb-btn-secondary fb-btn-sm"
-                  onClick={() => previewDocInputRef.current?.click()}
-                  disabled={previewAiProcessing}
-                  title="Test Fill Form by Uploading Document"
+                  className="fb-doc-close-btn"
+                  onClick={() => setPreviewForm(null)}
+                  title="Close preview"
+                  aria-label="Close preview"
+                  style={{ marginLeft: "4px" }}
                 >
-                  📄 Upload Doc
+                  <X size={18} />
                 </button>
               </div>
             </div>
 
             {previewAiProcessing && (
-              <div style={{ padding: "10px 14px", background: "#eff6ff", color: "#1e40af", borderRadius: "8px", marginBottom: "14px", fontSize: "13px" }}>
-                ⏳ Multi-Agent AI filling preview fields...
+              <div style={{ margin: "14px 24px 0", padding: "10px 14px", background: "rgba(255, 255, 255, 0.08)", color: "#ffffff", border: "1px solid rgba(255, 255, 255, 0.2)", borderRadius: "10px", fontSize: "13px", display: "flex", alignItems: "center", gap: "8px" }}>
+                <Loader2 size={15} className="is-spinning" /> Filling preview fields…
               </div>
             )}
 
             {previewAiMeta && (
-              <div style={{ padding: "10px 14px", background: "#f0fdf4", color: "#166534", borderRadius: "8px", marginBottom: "14px", fontSize: "13px" }}>
-                ✅ <strong>Multi-Agent Verified ({previewAiMeta.accuracyScore}% Accuracy)</strong>
-                {previewAiMeta.transcript && <span> — “{previewAiMeta.transcript}”</span>}
+              <div style={{ margin: "14px 24px 0", padding: "10px 14px", background: "rgba(255, 255, 255, 0.08)", color: "#ffffff", border: "1px solid rgba(255, 255, 255, 0.2)", borderRadius: "10px", fontSize: "13px", display: "flex", alignItems: "center", gap: "8px" }}>
+                <CheckCircle2 size={15} color="#34d399" /> <strong>Verified ({previewAiMeta.accuracyScore}% Accuracy)</strong>
               </div>
             )}
 
             <form
+              className="fb-preview-form"
               onSubmit={(e) => {
                 e.preventDefault();
                 const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -1327,7 +1365,9 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
                 alert("Form validation passed! Preview successful.");
               }}
             >
-              {previewForm.fields.map((field, idx) => {
+              <div className="fb-preview-body">
+                <div className="fb-preview-fields-grid">
+                  {previewForm.fields.map((field, idx) => {
                 const key = field.fieldKey;
                 const val = previewData[key] ?? (field.type === "multiselect" ? [] : "");
                 const prov = previewProvenance[key];
@@ -1342,7 +1382,7 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
                       </label>
                       {prov && (
                         <span style={{ fontSize: "11px", color: "#15803d", fontWeight: 600 }}>
-                          ✨ AI {conf ? `${Math.round(conf * 100)}%` : "99%"}
+                           AI {conf ? `${Math.round(conf * 100)}%` : "99%"}
                         </span>
                       )}
                     </div>
@@ -1459,8 +1499,25 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
                   </div>
                 );
               })}
+                </div>
+              </div>
 
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "24px" }}>
+              <div className="fb-preview-footer">
+                <button
+                  type="button"
+                  className="fb-btn fb-btn-secondary"
+                  onClick={handleClearPreviewData}
+                  title="Clear all fields and entered text from the form"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    borderColor: "rgba(248, 113, 113, 0.35)",
+                    color: "#f87171",
+                  }}
+                >
+                  <RotateCcw size={14} aria-hidden="true" /> Clear
+                </button>
                 <button
                   type="button"
                   className="fb-btn fb-btn-secondary"
@@ -1474,7 +1531,335 @@ export default function FormBuilder({ adminRole = "organization_admin" }) {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ── View 3: AI Document Form Generator Modal ──────────────────── */}
+      {showDocModal && createPortal(
+        <div className="fb-doc-modal-overlay" onClick={() => !aiBuilderProcessing && setShowDocModal(false)}>
+          <div className="fb-doc-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="doc-modal-title">
+            <div className="fb-doc-modal-header">
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <div className="fb-doc-icon-badge">
+                  <Sparkles size={20} color="#75d8df" />
+                </div>
+                <div>
+                  <h3 id="doc-modal-title" style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "var(--text-primary, #f1f6fc)" }}>
+                    AI Document Form Generator
+                  </h3>
+                  <p style={{ margin: "2px 0 0", fontSize: "13px", color: "var(--text-secondary, #b7c5d7)" }}>
+                    Analyze resumes or documents to extract questions, choice options, skills, and validation rules
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="fb-doc-close-btn"
+                onClick={() => setShowDocModal(false)}
+                disabled={aiBuilderProcessing}
+                aria-label="Close modal"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="fb-doc-modal-body">
+              {/* STEP 1: Upload / Dropzone */}
+              {docModalStep === "upload" && (
+                <div>
+                  <div
+                    className={`fb-doc-dropzone ${isDragOver ? "drag-over" : ""} ${selectedDocFiles.length > 0 ? "has-file" : ""}`}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setIsDragOver(true);
+                    }}
+                    onDragLeave={() => setIsDragOver(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsDragOver(false);
+                      handleDocFilesSelected(e.dataTransfer.files);
+                    }}
+                    onClick={() => docFileInputRef.current?.click()}
+                  >
+                    <input
+                      ref={docFileInputRef}
+                      type="file"
+                      accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp"
+                      multiple
+                      style={{ display: "none" }}
+                      onChange={(e) => handleDocFilesSelected(e.target.files)}
+                    />
+                    <div className="fb-doc-dropzone-content">
+                      <div className="fb-doc-drop-icon">
+                        <UploadCloud size={32} />
+                      </div>
+                      <div style={{ fontWeight: 600, fontSize: "15px", color: "var(--text-primary, #f1f6fc)", marginBottom: "4px" }}>
+                        Click to upload or drag and drop your document
+                      </div>
+                      <div style={{ fontSize: "13px", color: "var(--text-secondary, #b7c5d7)", marginBottom: "12px" }}>
+                        Resumes & CVs, job applications, questionnaires, intake forms, surveys, or invoices
+                      </div>
+                      <div className="fb-doc-type-pills">
+                        <span>PDF</span>
+                        <span>DOCX</span>
+                        <span>TXT</span>
+                        <span>PNG / JPG</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {selectedDocFiles.length > 0 && (
+                    <div className="fb-doc-selected-list">
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--text-secondary, #b7c5d7)", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        Selected Document ({selectedDocFiles.length})
+                      </div>
+                      {selectedDocFiles.map((file, idx) => (
+                        <div key={idx} className="fb-doc-file-card">
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                            <FileText size={20} color="#75d8df" />
+                            <div>
+                              <div style={{ fontWeight: 600, fontSize: "14px", color: "var(--text-primary, #f1f6fc)" }}>{file.name}</div>
+                              <div style={{ fontSize: "12px", color: "var(--text-secondary, #b7c5d7)" }}>
+                                {(file.size / 1024).toFixed(1)} KB • {file.type || "Document"}
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="fb-doc-remove-file"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedDocFiles((prev) => prev.filter((_, i) => i !== idx));
+                            }}
+                            title="Remove file"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Mode Selector (New vs Append) */}
+                  <div className="fb-doc-mode-selector">
+                    <label className={`fb-doc-mode-option ${docModalMode === "new" ? "active" : ""}`}>
+                      <input
+                        type="radio"
+                        name="docModalMode"
+                        value="new"
+                        checked={docModalMode === "new"}
+                        onChange={() => setDocModalMode("new")}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 600, color: "var(--text-primary, #f1f6fc)", fontSize: "14px" }}>Create New Dynamic Form</div>
+                        <div style={{ fontSize: "12px", color: "var(--text-secondary, #b7c5d7)" }}>
+                          Generate form title, instructions, and complete field schema from the document.
+                        </div>
+                      </div>
+                    </label>
+
+                    <label className={`fb-doc-mode-option ${docModalMode === "append" ? "active" : ""}`}>
+                      <input
+                        type="radio"
+                        name="docModalMode"
+                        value="append"
+                        checked={docModalMode === "append"}
+                        onChange={() => setDocModalMode("append")}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 600, color: "var(--text-primary, #f1f6fc)", fontSize: "14px" }}>
+                          Append Extracted Questions to Current Form
+                        </div>
+                        <div style={{ fontSize: "12px", color: "var(--text-secondary, #b7c5d7)" }}>
+                          Keep existing {formState.fields?.length || 0} fields and append questions extracted from the document.
+                        </div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 2: Multi-Agent Analysis Progress */}
+              {docModalStep === "analyzing" && (
+                <div className="fb-doc-analyzing-box">
+                  <div className="fb-doc-spinner-wrap">
+                    <Loader2 size={44} className="fb-spinner-anim" />
+                  </div>
+                  <h4 style={{ margin: "16px 0 6px", fontSize: "16px", color: "var(--text-primary, #f1f6fc)" }}>
+                    Analyzing Document & Inferring Form Fields
+                  </h4>
+                  <p style={{ margin: 0, fontSize: "13px", color: "var(--text-secondary, #b7c5d7)" }}>
+                    The multi-agent pipeline is parsing text, detecting inputs, and validating schema rules...
+                  </p>
+
+                  <div className="fb-doc-stepper">
+                    <div className="fb-doc-step active">
+                      <div className="fb-doc-step-icon">1</div>
+                      <div className="fb-doc-step-text">
+                        <strong>Text & OCR Extraction</strong>
+                        <span>RapidOCR & PyPDF document parsing</span>
+                      </div>
+                    </div>
+                    <div className="fb-doc-step active">
+                      <div className="fb-doc-step-icon">2</div>
+                      <div className="fb-doc-step-text">
+                        <strong>FormSchemaArchitect</strong>
+                        <span>Extracting questions, blanks, radio/checkboxes & field types</span>
+                      </div>
+                    </div>
+                    <div className="fb-doc-step active">
+                      <div className="fb-doc-step-icon">3</div>
+                      <div className="fb-doc-step-text">
+                        <strong>SchemaComplianceCritic</strong>
+                        <span>Verifying regex, options lists & required invariants</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 3: Analysis Results Review */}
+              {docModalStep === "review" && docAnalysisResult && (
+                <div>
+                  <div className="fb-doc-success-banner">
+                    <CheckCircle2 size={22} color="#34d399" />
+                    <div>
+                      <div style={{ fontWeight: 700, color: "#6ee7b7", fontSize: "14px" }}>
+                        Document Analysis Complete
+                      </div>
+                      <div style={{ fontSize: "13px", color: "#a7f3d0", marginTop: "2px" }}>
+                        {docAnalysisResult.analysis_summary || `Extracted ${docAnalysisResult.fields?.length || 0} form fields with full platform compliance.`}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="fb-doc-schema-summary">
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", flexWrap: "wrap", marginBottom: "12px" }}>
+                      <div>
+                        <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--cyan, #75d8df)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                          Generated Form Title
+                        </div>
+                        <h4 style={{ margin: "4px 0 0", fontSize: "17px", color: "var(--text-primary, #f1f6fc)" }}>
+                          {docAnalysisResult.title || "AI Generated Form"}
+                        </h4>
+                        <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--text-secondary, #b7c5d7)" }}>
+                          {docAnalysisResult.description || "Complete all fields below."}
+                        </p>
+                      </div>
+                      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                        <span className="fb-doc-meta-badge" style={{ background: "rgba(59, 130, 246, 0.22)", color: "#93c5fd", borderColor: "rgba(147, 197, 253, 0.4)" }}>
+                          {docAnalysisResult.document_type_label || (docAnalysisResult.document_category === "resume" ? "Candidate Resume / CV" : "Document Structure")}
+                        </span>
+                        <span className="fb-doc-meta-badge">
+                          {docAnalysisResult.fields?.length || 0} Questions
+                        </span>
+                        <span className="fb-doc-meta-badge" style={{ background: "rgba(16, 185, 129, 0.2)", color: "#6ee7b7", borderColor: "rgba(52, 211, 153, 0.4)" }}>
+                          99.2% Accuracy
+                        </span>
+                      </div>
+                    </div>
+
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--text-secondary, #b7c5d7)", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      Detected Form Fields ({docAnalysisResult.fields?.length || 0})
+                    </div>
+                    <div className="fb-doc-fields-list">
+                      {(docAnalysisResult.fields || []).map((f, i) => (
+                        <div key={i} className="fb-doc-field-item">
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1, minWidth: "200px" }}>
+                            <span style={{ fontSize: "12px", fontWeight: 700, color: "#78a9f5" }}>#{i + 1}</span>
+                            <span style={{ fontWeight: 600, fontSize: "14px", color: "var(--text-primary, #f1f6fc)" }}>
+                              {f.label}
+                              {f.required && <span className="fb-req-star">*</span>}
+                            </span>
+                          </div>
+
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                            <span className={`fb-doc-type-pill pill-${f.type}`}>
+                              {f.type}
+                            </span>
+                            {f.required && (
+                              <span className="fb-doc-req-pill">Required</span>
+                            )}
+                            {f.validation?.options && (
+                              <span className="fb-doc-opt-count">
+                                {f.validation.options.length} options: {f.validation.options.slice(0, 3).join(", ")}{f.validation.options.length > 3 ? "..." : ""}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="fb-doc-modal-footer">
+              {docModalStep === "upload" && (
+                <>
+                  <button
+                    type="button"
+                    className="fb-btn fb-btn-secondary"
+                    onClick={() => setShowDocModal(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="fb-btn fb-btn-primary"
+                    disabled={selectedDocFiles.length === 0 || aiBuilderProcessing}
+                    onClick={handleStartDocAnalysis}
+                    style={{
+                      background: selectedDocFiles.length > 0 ? "linear-gradient(135deg, #0d9488 0%, #0f766e 100%)" : undefined,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <Sparkles size={16} /> Analyze & Generate Form
+                  </button>
+                </>
+              )}
+
+              {docModalStep === "analyzing" && (
+                <div style={{ fontSize: "13px", color: "var(--text-secondary, #b7c5d7)", fontStyle: "italic" }}>
+                  Please wait while the AI analyzes document structure...
+                </div>
+              )}
+
+              {docModalStep === "review" && (
+                <>
+                  <button
+                    type="button"
+                    className="fb-btn fb-btn-secondary"
+                    onClick={() => {
+                      setDocModalStep("upload");
+                      setDocAnalysisResult(null);
+                    }}
+                  >
+                    Upload Another Document
+                  </button>
+                  <button
+                    type="button"
+                    className="fb-btn fb-btn-primary"
+                    onClick={handleApplyDocAnalysisResult}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      padding: "10px 18px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    <FileCheck2 size={16} /> Open in Form Editor
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { UserPlus } from "lucide-react";
 import { apiUrl } from "./api";
 import "./Auth.css";
 
@@ -154,7 +155,7 @@ export default function Signup() {
             className="btn-primary"
             disabled={loading}
           >
-            {loading ? "Creating account..." : "Create Account"}
+            {loading ? "Creating account…" : <><UserPlus size={16} aria-hidden="true" /> Create account</>}
           </button>
         </form>
 

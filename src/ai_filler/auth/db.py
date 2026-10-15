@@ -64,6 +64,8 @@ CREATE TABLE IF NOT EXISTS forms (
     organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     description TEXT,
+    enable_voice INTEGER NOT NULL DEFAULT 1,
+    enable_doc_upload INTEGER NOT NULL DEFAULT 1,
     created_by INTEGER REFERENCES identities(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -144,6 +146,20 @@ def connect() -> sqlite3.Connection:
     if "recovery_email" not in columns:
         try:
             connection.execute("ALTER TABLE identities ADD COLUMN recovery_email TEXT")
+        except sqlite3.OperationalError as error:
+            if "duplicate column name" not in str(error).lower():
+                raise
+
+    form_columns = {row["name"] for row in connection.execute("PRAGMA table_info(forms)")}
+    if "enable_voice" not in form_columns:
+        try:
+            connection.execute("ALTER TABLE forms ADD COLUMN enable_voice INTEGER NOT NULL DEFAULT 1")
+        except sqlite3.OperationalError as error:
+            if "duplicate column name" not in str(error).lower():
+                raise
+    if "enable_doc_upload" not in form_columns:
+        try:
+            connection.execute("ALTER TABLE forms ADD COLUMN enable_doc_upload INTEGER NOT NULL DEFAULT 1")
         except sqlite3.OperationalError as error:
             if "duplicate column name" not in str(error).lower():
                 raise

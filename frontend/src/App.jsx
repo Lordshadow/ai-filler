@@ -8,6 +8,7 @@ import UserPanel from './UserPanel'
 import AdminPanel from './AdminPanel'
 import SuperAdminPanel from './SuperAdminPanel'
 import { authFetch } from './api'
+import StudioBackdrop from './StudioBackdrop'
 
 function ProtectedRoute({ children, loginPath = '/login', allowedRoles = null }) {
   const [isAuthenticated, setIsAuthenticated] = useState(null)
@@ -66,6 +67,7 @@ function ProtectedRoute({ children, loginPath = '/login', allowedRoles = null })
 function App() {
   return (
     <Router>
+      <StudioBackdrop />
       <Routes>
         <Route path="/admin" element={<Navigate to="/admin/login" replace />} />
         <Route path="/super-admin" element={<Navigate to="/super-admin/login" replace />} />
@@ -75,7 +77,6 @@ function App() {
         <Route path="/forgot-password/:role" element={<ForgotPassword />} />
         <Route path="/reset-password/:role" element={<ResetPassword />} />
         <Route path="/signup" element={<Signup />} />
-        <Route path="/voice" element={<Navigate to="/user-panel" replace />} />
         <Route path="/documents" element={<Navigate to="/user-panel" replace />} />
         <Route
           path="/forms"

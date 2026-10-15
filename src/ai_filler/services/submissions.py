@@ -274,25 +274,33 @@ def get_applications(user: dict[str, Any]) -> list[dict[str, Any]]:
                 (user_id,),
             ).fetchall()
 
-        return [
-            {
-                "applicationId": r["id"],
-                "draftId": r["draft_id"],
-                "formId": r["form_id"],
-                "formTitle": r["form_title"] or r["form_id"],
-                "formVersion": r["form_version"],
-                "userId": r["user_id"],
-                "userName": r["user_name"],
-                "userEmail": r["user_email"],
-                "organizationId": r["organization_id"],
-                "organizationName": r["organization_name"],
-                "status": r["status"],
-                "data": json.loads(r["data"]),
-                "submittedAt": r["submitted_at"],
-                "updatedAt": r["updated_at"],
-            }
-            for r in rows
-        ]
+        results: list[dict[str, Any]] = []
+        for r in rows:
+            audit_row = db.execute(
+                "SELECT provenance FROM application_provenance_audit WHERE application_id = ? ORDER BY id DESC LIMIT 1",
+                (r["id"],),
+            ).fetchone()
+            prov = json.loads(audit_row["provenance"]) if audit_row and audit_row["provenance"] else {}
+            results.append(
+                {
+                    "applicationId": r["id"],
+                    "draftId": r["draft_id"],
+                    "formId": r["form_id"],
+                    "formTitle": r["form_title"] or r["form_id"],
+                    "formVersion": r["form_version"],
+                    "userId": r["user_id"],
+                    "userName": r["user_name"],
+                    "userEmail": r["user_email"],
+                    "organizationId": r["organization_id"],
+                    "organizationName": r["organization_name"],
+                    "status": r["status"],
+                    "data": json.loads(r["data"]),
+                    "provenance": prov,
+                    "submittedAt": r["submitted_at"],
+                    "updatedAt": r["updated_at"],
+                }
+            )
+        return results
 
 
 VALID_APPLICATION_STATUSES = {"SUBMITTED", "UNDER_REVIEW", "APPROVED", "REJECTED"}
@@ -409,12 +417,13 @@ def get_application_by_id(app_id: str, user: dict[str, Any]) -> dict[str, Any] |
             "updatedAt": r["updated_at"],
         }
 
-        # Include provenance audit trail for Admins
-        if is_org_admin or is_super:
-            audit_rows = db.execute(
-                "SELECT provenance, recorded_at FROM application_provenance_audit WHERE application_id = ?",
-                (app_id,),
-            ).fetchall()
+        # Include provenance audit trail for the owner and Admins
+        audit_rows = db.execute(
+            "SELECT provenance, recorded_at FROM application_provenance_audit WHERE application_id = ? ORDER BY id DESC",
+            (app_id,),
+        ).fetchall()
+        result["provenance"] = json.loads(audit_rows[0]["provenance"]) if audit_rows and audit_rows[0]["provenance"] else {}
+        if is_owner or is_org_admin or is_super:
             result["provenanceAudit"] = [
                 {"provenance": json.loads(a["provenance"]), "recordedAt": a["recorded_at"]}
                 for a in audit_rows
