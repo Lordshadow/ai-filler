@@ -65,7 +65,6 @@ def normalize_elevenlabs_language(language: str | None) -> str | None:
 
 
 DEFAULT_WHISPER_TEMPERATURE = 0.0
-DEFAULT_GROQ_WHISPER_MODEL = os.getenv("AI_FILLER_WHISPER_MODEL", "whisper-large-v3-turbo")
 
 
 def normalize_whisper_language(language: str | None) -> str | None:
@@ -271,7 +270,7 @@ def transcribe_audio(
                     whisper_lang = normalize_whisper_language(language)
                     response = groq_client.audio.transcriptions.create(
                         file=audio_file,
-                        model=DEFAULT_GROQ_WHISPER_MODEL,
+                        model="whisper-large-v3",
                         response_format="text",
                         language=whisper_lang,
                         prompt=str(prompt) if prompt and isinstance(prompt, str) else None,

@@ -1115,18 +1115,13 @@ def fill_form_multi_agent(
         fields=target_fields,
         target_field_key=target_field_key,
     )
-    # Fast-path optimization: If a single target field was answered and cleanly extracted deterministically,
-    # skip the redundant LLM call to save 400-800ms of external inference latency while preserving Critic verification.
-    if target_field_key and det_fields.get(target_field_key) is not None and det_fields.get(target_field_key) != "":
-        llm_fields = {}
-    else:
-        llm_fields = _llm_extract_fields(
-            normalized_text=normalized_text,
-            fields=target_fields,
-            form_title=form_title,
-            target_field_key=target_field_key,
-            client=client,
-        )
+    llm_fields = _llm_extract_fields(
+        normalized_text=normalized_text,
+        fields=target_fields,
+        form_title=form_title,
+        target_field_key=target_field_key,
+        client=client,
+    )
 
     merged_candidates: dict[str, Any] = {**det_fields}
     for k, v in llm_fields.items():

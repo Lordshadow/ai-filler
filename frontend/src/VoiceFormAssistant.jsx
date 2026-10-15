@@ -136,8 +136,8 @@ export default function VoiceFormAssistant({
       ];
       const mimeType = supportedTypes.find((type) => MediaRecorderClass.isTypeSupported?.(type));
       const recorder = mimeType
-        ? new MediaRecorderClass(stream, { mimeType, audioBitsPerSecond: 32000 })
-        : new MediaRecorderClass(stream, { audioBitsPerSecond: 32000 });
+        ? new MediaRecorderClass(stream, { mimeType, audioBitsPerSecond: 128000 })
+        : new MediaRecorderClass(stream, { audioBitsPerSecond: 128000 });
 
       recorderRef.current = recorder;
       audioChunksRef.current = [];
@@ -180,27 +180,9 @@ export default function VoiceFormAssistant({
 
         setPhase("processing");
         try {
-          const answerResult = await onAudioAnswer(audioBlob, fields[fieldIndex], language);
-          const transcript = typeof answerResult === "string" ? answerResult : answerResult?.text;
-          const isPopulated = typeof answerResult === "object" ? Boolean(answerResult?.populated) : false;
-          const detectedCommand = typeof answerResult === "object" ? answerResult?.command : null;
-
+          const transcript = await onAudioAnswer(audioBlob, fields[fieldIndex], language);
           if (generation === generationRef.current && transcript?.trim()) {
-            if (isPopulated) {
-              setInterim("");
-              setMessages((current) => [...current, { role: "user", text: transcript.trim() }]);
-              const nextIndex = fieldIndex + 1;
-              if (nextIndex >= fields.length) {
-                ask(nextIndex, generation);
-                return;
-              }
-              const confirmation = language === "ta" ? "சரி." : "Got it.";
-              setMessages((current) => [...current, { role: "assistant", text: confirmation }]);
-              setPhase("speaking");
-              speak(confirmation, generation, () => ask(nextIndex, generation));
-            } else {
-              handleAnswerRef.current?.(transcript.trim(), generation, detectedCommand);
-            }
+            handleAnswerRef.current?.(transcript.trim(), generation);
           } else if (generation === generationRef.current) {
             setPhase("error");
             setError("I couldn't hear a clear answer. Please try again or type it below.");
@@ -258,9 +240,7 @@ export default function VoiceFormAssistant({
             setAudioEnergy(energy);
           } else {
             setAudioEnergy((prev) => Math.max(0, prev * 0.72));
-            const currentFieldType = fields[fieldIndex]?.type;
-            const silenceLimit = currentFieldType === "textarea" ? 1200 : 750;
-            if (speechStartedAtRef.current && now - lastSpeechAtRef.current >= silenceLimit && now - speechStartedAtRef.current >= 300) {
+            if (speechStartedAtRef.current && now - lastSpeechAtRef.current >= 1700 && now - speechStartedAtRef.current >= 350) {
               recorder.stop();
               return;
             }
@@ -428,7 +408,7 @@ export default function VoiceFormAssistant({
     });
   }, [fields, language, listen, speak, stopCapture, stopSpeechPlayback]);
 
-  const handleAnswer = useCallback(async (text, generation = generationRef.current, preDetectedCommand = null) => {
+  const handleAnswer = useCallback(async (text, generation = generationRef.current) => {
     if (!text.trim() || generation !== generationRef.current) return;
     if (recorderRef.current?.state === "recording") {
       discardCaptureRef.current = true;
@@ -440,11 +420,9 @@ export default function VoiceFormAssistant({
     const field = fields[fieldIndex];
     const normalized = text.trim().toLocaleLowerCase().replace(/[.!?,;:]+$/g, "");
     const optionValues = (field.validation?.options || []).map((option) => String(option).trim().toLocaleLowerCase());
-    const command = preDetectedCommand || (
-      optionValues.includes(normalized)
-        ? null
-        : Object.entries(COMMANDS).find(([, phrases]) => phrases.includes(normalized))?.[0]
-    );
+    const command = optionValues.includes(normalized)
+      ? null
+      : Object.entries(COMMANDS).find(([, phrases]) => phrases.includes(normalized))?.[0];
 
     if (command === "stop") {
       const stopped = language === "ta" ? "சரி, இங்கே நிறுத்துகிறேன்." : "Stopping here. You can review your answers.";

@@ -14,7 +14,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from .agents.form_agents import (
-    detect_voice_interview_command,
     fill_form_from_document_multi_agent,
     fill_form_multi_agent,
     generate_form_from_document_multi_agent,
@@ -1074,12 +1073,9 @@ async def ai_voice_transcribe_endpoint(
     form_title: str = Form(""),
     field_label: str = Form(""),
     options_json: str = Form("[]"),
-    fields_json: str | None = Form(None),
-    target_field_key: str | None = Form(None),
-    current_data_json: str | None = Form(None),
     identity: dict[str, object] = Depends(current_write_identity),
-) -> dict[str, Any]:
-    """Transcribe voice answer, with optional single-roundtrip extraction and command detection."""
+) -> dict[str, str]:
+    """Transcribe a short voice answer for browsers without SpeechRecognition."""
     try:
         options = json.loads(options_json or "[]")
         if not isinstance(options, list) or not all(isinstance(option, str) for option in options):
@@ -1109,44 +1105,6 @@ async def ai_voice_transcribe_endpoint(
         )
         if not transcript.strip():
             raise HTTPException(status_code=422, detail="I couldn't hear a clear answer. Please try again.")
-
-        # If full field schema is supplied, execute fast single-roundtrip extraction
-        if fields_json and target_field_key:
-            form_fields = _parse_json_list(fields_json, "fields_json")
-            current_data = _parse_json_dict(current_data_json, "current_data_json")
-            target_field_obj = next(
-                (f for f in form_fields if (f.get("fieldKey") or f.get("name")) == target_field_key),
-                None,
-            )
-            command = detect_voice_interview_command(transcript, target_field_obj)
-            if command:
-                return {
-                    "text": transcript,
-                    "transcript": transcript,
-                    "command": command,
-                    "fields": {},
-                    "confidence": {},
-                    "provenance": {},
-                }
-
-            result = fill_form_multi_agent(
-                raw_text=transcript,
-                form_fields=form_fields,
-                form_title=form_title,
-                source_type="AI_VOICE",
-                target_field_key=target_field_key,
-                current_data=current_data,
-            )
-            return {
-                "text": transcript,
-                "transcript": transcript,
-                "command": None,
-                "fields": result.get("fields", {}),
-                "confidence": result.get("confidence", {}),
-                "provenance": result.get("provenance", {}),
-                "critic_errors": result.get("critic_errors", []),
-            }
-
         return {"text": transcript}
     except HTTPException:
         raise

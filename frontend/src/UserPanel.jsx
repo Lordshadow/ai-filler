@@ -370,43 +370,17 @@ export default function UserPanel() {
   const handleVoiceAudio = async (audioBlob, field, language) => {
     setAiProcessing(true);
     try {
-      const key = field.fieldKey || field.name;
       const extension = audioBlob.type.includes("mp4") ? "m4a" : audioBlob.type.includes("ogg") ? "ogg" : "webm";
-
       const payload = new FormData();
       payload.append("file", audioBlob, `voice-answer.${extension}`);
       payload.append("language", language === "ta" ? "ta" : language.startsWith("en") ? "en" : "auto");
       payload.append("form_title", activeForm.title || "");
       payload.append("field_label", field.label || "");
       payload.append("options_json", JSON.stringify(field.validation?.options || []));
-      payload.append("fields_json", JSON.stringify(activeForm.fields || []));
-      payload.append("target_field_key", key || "");
-      payload.append("current_data_json", JSON.stringify(formData || {}));
-
       const response = await authFetch("/ai/voice/transcribe", { method: "POST", body: payload });
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail || "Voice transcription failed.");
-
-      const targetVal = result.fields?.[key];
-      const hasVal = targetVal !== undefined && targetVal !== null && targetVal !== "";
-      if (hasVal) {
-        setFormData((prev) => ({
-          ...prev,
-          [key]: field.type === "multiselect"
-            ? (Array.isArray(targetVal) ? targetVal : [String(targetVal)])
-            : field.type === "checkbox"
-            ? Boolean(targetVal)
-            : String(targetVal),
-        }));
-        if (result.provenance?.[key]) {
-          setFieldProvenance((prev) => ({ ...prev, [key]: result.provenance[key] }));
-        }
-      }
-      return {
-        text: result.transcript || result.text || "",
-        command: result.command || null,
-        populated: hasVal,
-      };
+      return result.text || "";
     } finally {
       setAiProcessing(false);
     }
